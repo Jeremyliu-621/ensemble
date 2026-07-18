@@ -15,7 +15,8 @@ import secrets
 import config
 from config import MIN_LEAD_MS
 from engine.candidates import ART, GENERATORS, generate
-from engine.harmony import PAD_VEL, ROOT_VEL, bar_chords, chord_span, thin_grid, voice_lead
+from engine.harmony import (PAD_VEL, ROOT_VEL, approach_run, arpeggiate, bar_chords,
+                            chord_span, passing_infill, thin_grid, voice_lead)
 from engine.song import builtin_song
 from engine.theory import midi_to_name, triad, voice_triad
 from engine_api import CancelSpec, GestureWindow, NoteEvent, SectionInfo
@@ -244,12 +245,10 @@ class Conductor:
         DRAMATIC motion (fast + short = a stab) gets a fortissimo two-octave
         chord sting with a crash; anything gentler gets a quick low-velocity
         flourish. The full musical response still lands at the bar line."""
+        if not self._playing or not config.PICKUP:
+            return
         g = self._gesture
         sting = self._is_stab(g)
-        # The sting IS the sharp flick's whole meaning, so it always fires; the
-        # every-gesture flourish is the part that annoyed and stays opt-in.
-        if not self._playing or not (sting or config.PICKUP):
-            return
         eighth = self.bar_ms / 8
         bar_start = self._next_bar_start - self.bar_ms
         at = bar_start + math.ceil((t_end_ms + 60.0 - bar_start) / eighth) * eighth
@@ -343,7 +342,9 @@ class Conductor:
         a firm push = GROUND (harmonize), the lightest push that still lifts =
         EMBELLISH (passing)."""
         g = self._gesture
-        if g is None:
+        # A build arc blooms chords by definition — the climax needs its
+        # harmonic bed, not sparse ornaments, whatever gesture armed it.
+        if g is None or self._arc_now[1] > 0:
             return "harmonize"
         if g.rotation > 0.5:
             return "arpeggio"
@@ -366,6 +367,11 @@ class Conductor:
         if self._barmodel.configured:
             tgt, prev = self.song.bar(idx + 2), self.song.bar(idx + 1)
             style = self._arr_style() if self.song.parts else style_for(self._gesture)
+            # Never ask the deployed adapter for a style it wasn't trained on —
+            # it would improvise something OFF-style and we'd play it under the
+            # style's name. Out-of-list styles are deterministic (harmony.py).
+            if style not in config.BARMODEL_STYLES:
+                style = "harmonize"
             self._barmodel.prefetch(idx + 2, build_bar_context(
                 key_root=self.song.key_root, bpm=self.bpm,
                 chord_root=tgt.chord_root, chord_minor=tgt.chord_minor,
@@ -539,39 +545,68 @@ class Conductor:
                                              dur * self.s16_ms, midi_out, max(0.12, vel * svol), art,
                                              inst=part.instrument))
 
-        # HARMONY on a push: held, voice-led chords that re-strike only when the
-        # song's harmony changes. The trained model's line takes the seat when
-        # one landed (sanitized, so it can only be chord-tones-in-register);
-        # the deterministic theory below is the ever-present fallback.
+        # HARMONY on a push: the ear-ranked device for the gesture. The line is
+        # the trained model's when one landed FOR THIS STYLE, else the exact
+        # deterministic generator the model is trained on (engine/harmony.py) —
+        # so every device sounds NOW, model in or out, and sounds the same.
+        device = None
         if lift > 0.2:
             chord = self._chords[idx % len(self._chords)]
-            pad_vel = PAD_VEL * (0.5 + 0.5 * lift)
-            if gen_line and lift > 0.2:
-                gstyle = getattr(self, "_gen_style", "harmonize")
+            style = self._arr_style()
+            line, src = None, None
+            if gen_line and getattr(self, "_gen_style", None) == style:
+                line, src = gen_line, "model"
+            elif style == "arpeggio":
+                line, src = arpeggiate(self.song.bar(idx), self.song.bar(idx - 1),
+                                       self.song.key_root), "theory"
+            elif style == "passing":
+                # Gap infill where the melody leaps, plus the approach run into
+                # each chord change — so a light touch answers on EVERY song,
+                # including ones whose melody never leaves stepwise motion.
+                b = self.song.bar(idx)
+                line = (passing_infill(b, self.song.bar(idx - 1), self.song.key_root)
+                        + approach_run(b, self.song.bar(idx + 1), self.song.key_root))
+                src = "theory"
+            if line and style != "harmonize":
                 mel_inst = next((p.instrument for p in self.song.parts if p.is_melody), "violin")
                 solo_piece = len([p for p in self.song.parts if not p.is_drum]) <= 1
-                # Ornaments (passing/echo) always ride the melody's own
-                # instrument; on a solo piece EVERY device speaks that
-                # instrument so nothing "comes out of nowhere".
-                inst = mel_inst if (solo_piece or gstyle in ("passing", "echo")) else \
-                    {"harmonize": "viola", "arpeggio": "harp"}.get(gstyle, "viola")
-                cap = 5 if gstyle == "harmonize" else 16
-                for (on, dur, midi, vel) in gen_line[:cap]:
+                # Ornaments ride the melody's own instrument; on a solo piece
+                # EVERY device speaks it so nothing "comes out of nowhere".
+                inst = mel_inst if (solo_piece or style == "passing") else "harp"
+                for (on, dur, midi, vel) in line[:16]:
                     art = "sustain" if dur >= 8 else "pluck"
                     events.append(self._note(SECTION_ALL, bar_start + on * self.s16_ms,
                                              dur * self.s16_ms, midi,
                                              min(vel, 0.35 + 0.3 * lift), art, inst=inst))
                 self._pad_until = idx
-            elif idx > self._pad_until or self._chords[(idx - 1) % len(self._chords)] != chord:
-                span = chord_span(self._chords, idx % len(self._chords))
-                self._pad_voices = voice_lead(self._pad_voices, triad(*chord))
-                dur_ms = span * self.bar_ms * 0.98
-                for v in self._pad_voices:
-                    events.append(self._note(SECTION_ALL, bar_start, dur_ms, v,
-                                             pad_vel, "sustain", inst="viola"))
-                events.append(self._note(SECTION_ALL, bar_start, dur_ms, 36 + chord[0],
-                                         ROOT_VEL * (0.5 + 0.5 * lift), "sustain", inst="cello"))
-                self._pad_until = idx + span - 1
+                device = f"{style} · {src}"
+            elif line and src == "model":
+                # Harmonize from the keeper model — the ear-approved live path,
+                # unchanged: its held voicing re-lands each bar.
+                for (on, dur, midi, vel) in line[:5]:
+                    art = "sustain" if dur >= 8 else "pluck"
+                    events.append(self._note(SECTION_ALL, bar_start + on * self.s16_ms,
+                                             dur * self.s16_ms, midi,
+                                             min(vel, 0.35 + 0.3 * lift), art, inst="viola"))
+                self._pad_until = idx
+                device = "harmonize · model"
+            else:
+                # Deterministic pads (harmonize with no model line, or an
+                # ornament with nothing to say this bar): held, voice-led
+                # chords, re-struck only when the harmony moves.
+                if idx > self._pad_until or self._chords[(idx - 1) % len(self._chords)] != chord:
+                    span = chord_span(self._chords, idx % len(self._chords))
+                    self._pad_voices = voice_lead(self._pad_voices, triad(*chord))
+                    dur_ms = span * self.bar_ms * 0.98
+                    pad_vel = PAD_VEL * (0.5 + 0.5 * lift)
+                    for v in self._pad_voices:
+                        events.append(self._note(SECTION_ALL, bar_start, dur_ms, v,
+                                                 pad_vel, "sustain", inst="viola"))
+                    events.append(self._note(SECTION_ALL, bar_start, dur_ms, 36 + chord[0],
+                                             ROOT_VEL * (0.5 + 0.5 * lift), "sustain", inst="cello"))
+                    self._pad_until = idx + span - 1
+                device = ("harmonize · pad" if style == "harmonize"
+                          else f"{style} · tacet (pad)")
         else:
             self._pad_until = -1                 # released: next push re-voices fresh
 
@@ -580,9 +615,8 @@ class Conductor:
             self._device = "verbatim"
         elif calm >= lift:
             self._device = "hush"
-        elif lift > 0.2:
-            self._device = (f"{getattr(self, '_gen_style', 'harmonize')} · model"
-                            if gen_line else "harmonize · pad")
+        elif device:
+            self._device = device
         else:
             self._device = "swelling"            # pushed, device engages next bar
         log.info("bar %d arrangement: i=%.2f %s (%d parts -> %d sections)%s",

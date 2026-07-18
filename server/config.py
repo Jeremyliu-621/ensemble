@@ -86,3 +86,10 @@ BARMODEL_KEY = os.environ.get("WM_BARMODEL_KEY", "")
 # prefetches two bars ahead to absorb it. A faster host (e.g. Parasail) can
 # tighten both this and the prefetch horizon.
 BARMODEL_TIMEOUT_MS = float(os.environ.get("WM_BARMODEL_TIMEOUT_MS", "7000"))
+# Styles the DEPLOYED adapter is trusted to speak (what it was trained AND
+# ear/judge-proven on). Styles outside this set are served by the deterministic
+# theory in engine/harmony.py instead — the same generators that teach the
+# model, so the sound is identical by construction. When the theory-device run
+# (v3) is deployed and proven, widen via WM_BARMODEL_STYLES.
+BARMODEL_STYLES = set(filter(None, os.environ.get(
+    "WM_BARMODEL_STYLES", "harmonize,dense,calm,counter,echo,free").split(",")))

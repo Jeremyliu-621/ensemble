@@ -119,6 +119,20 @@ def passing_infill(bar, prev, key: int) -> list:
     return out[:6]   # ≤6 passing tones a bar — embellishment, not a second melody
 
 
+def approach_run(bar, nxt, key: int) -> list:
+    """EMBELLISH, at a chord change: three diatonic 16ths climbing the last
+    beat into the next bar's chord — the 'glissando into the new chord' the
+    listening tests singled out. Silent while the harmony holds, so it reads
+    as intention, not noodling."""
+    if (nxt.chord_root, nxt.chord_minor) == (bar.chord_root, bar.chord_minor):
+        return []
+    center = (sum(m for (_o, _d, m) in bar.melody) // len(bar.melody)) if bar.melody else 67
+    target = min((nxt.chord_root + 12 * o for o in range(3, 8)),
+                 key=lambda m: abs(m - center))
+    below = [m for m in scale_notes(key, 40, 96) if m < target][-3:]
+    return [(13 + i, 1, m, 0.45) for i, m in enumerate(below)]
+
+
 def arpeggiate(bar, prev, key: int) -> list:
     """ENERGIZE: the bar's chord as an Alberti-pattern 8th figure (low-high-
     mid-high) in the register below the melody."""

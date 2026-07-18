@@ -92,12 +92,12 @@ class Scheduler:
         status = getattr(self._engine, "status", None)
         if status:
             st = status()
-            # Fire on decision changes, on envelope movement (~0.05 steps, so the
-            # stage can animate conducting intensity live) AND on any transport
-            # change (anchor/tempo/length — drives the editor/console playhead).
+            # Fire on decision/device changes, on envelope movement (~0.05 steps,
+            # so the stage can animate conducting intensity live) AND on any
+            # transport change (anchor/tempo/length — drives the editor playhead).
             tr = st.get("transport") or {}
             tsig = (tr.get("playing"), round(tr.get("anchor", 0.0)), tr.get("n_bars"), round(tr.get("bar_ms", 0.0)))
-            key = (st.get("last_choice"), st.get("decision_source"),
+            key = (st.get("last_choice"), st.get("decision_source"), st.get("device"),
                    round(st.get("intensity", 0.5) * 20))
             if key != self._seen_choice or tsig != self._seen_transport:
                 self._seen_choice = key
@@ -105,6 +105,7 @@ class Scheduler:
                 await self._hub.broadcast({
                     "t": ENGINE_STATE, "last_choice": st["last_choice"], "gesture": st["gesture"],
                     "decision_source": st.get("decision_source"),
+                    "device": st.get("device"),
                     "intensity": st.get("intensity"),
                     "playing": st["playing"], "bpm": st["bpm"], "song": st["song"], "transport": tr,
                 }, roles=("stage", "admin"))

@@ -70,7 +70,6 @@ const GESTURES = {
   "🍃 GENTLE → hush":              () => imu(0.3, 0, 0, 600, 12),   // target≈0 → thin out
   "🌀 TWIST → arpeggio":           () => imu(2, 160, 0, 700, 30),   // rotation .8 lifts it
   "🪶 LIGHT TOUCH → passing tones": () => imu(7, 0, 0, 700, 30),    // e=.68: gentlest push
-  "⚡ SHARP FLICK → sting":        () => imu(12, 0, 0, 300, 18),    // accent, instant
   "🌅 SWELL → 4-bar build":        () => imu(6, 0, 8.5, 1200, 50),  // slow lift arms the arc
 };
 for (const [name, gen] of Object.entries(GESTURES)) {
