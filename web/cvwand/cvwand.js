@@ -115,7 +115,10 @@ boot();
 // --- WebSocket ---
 let lastDevice = null;
 function connect() {
-  conn = new Conn({ role: "wand-cv", session });
+  // ephemeral: the hub iframe and a popped-out camera tab must be two distinct
+  // clients — a shared persisted id makes them evict each other from the single
+  // wand slot in a 1 Hz reconnect storm (the wand "randomly dying" bug).
+  conn = new Conn({ role: "wand-cv", session, ephemeral: true });
   conn.onOpen(() => { el("dot").classList.add("ok"); });
   conn.onClose(() => { el("dot").classList.remove("ok"); });
   // No guesswork: the engine reports what each gesture ACTUALLY did (`device`),

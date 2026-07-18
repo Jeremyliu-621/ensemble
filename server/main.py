@@ -428,6 +428,22 @@ class App:
             await self._admin(msg.get("cmd"), msg.get("args") or {})
             return
 
+        # Single wand: only the slot owner's input counts. Two cameras can be
+        # open at once (the hub iframe + a popped-out tab) — the newest hello
+        # owns the slot and the other stream is ignored, instead of the two
+        # evicting each other in a reconnect loop. If the owner dropped, the
+        # next wand message adopts its sender so the slot self-heals.
+        if (conn.role in P.WAND_ROLES
+                and t in (P.WAND_IMU, P.WAND_POSE, P.WAND_GRAB, P.WAND_MODE,
+                          P.WAND_FEEDBACK, P.WAND_GESTURE, P.WAND_RECAL)):
+            if self._wand_client is None:
+                self._wand_client = conn.client_id
+                self.session.wand = WandSlot(connected=True, variant=P.WAND_VARIANT[conn.role])
+                self.wand.reset()
+                log.info("wand slot adopted by %s", conn.client_id[:8])
+            elif conn.client_id != self._wand_client:
+                return
+
         # Wand input -> router (buffers frames per grab, hands the engine a
         # complete gesture window on release). IMU frames also feed aiming.
         if t == P.WAND_IMU:
