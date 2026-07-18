@@ -42,6 +42,9 @@ class Conductor:
         self._aim: str | None = None                    # wand-aimed section (spatial/solo mode)
         self._part_map: dict[int, str] | None = None    # LLM arranger: part idx -> section
         self._pickup: list | None = None                # instant gesture answer, pending emission
+        self._arc = 0                                   # bars left in a build arc (0 = none)
+        self._arc_total = 4
+        self._arc_now = (1.0, 0.0, False)               # this bar's (vel_mult, density_floor, climax)
         self._model = RemoteModel()                     # trained policy (WM_MODEL_URL); optional
         self._barmodel = RemoteBarModel()               # trained line writer (WM_BARMODEL_URL)
         self._decision: Decision | None = None          # the policy's active answer, until the next gesture
@@ -147,9 +150,24 @@ class Conductor:
     def _gesture_in(self, features: GestureFeatures, t_end_ms: float) -> None:
         self._gesture = features
         log.info("gesture -> %s", {k: round(v, 2) for k, v in features.as_dict().items()})
+        # A SWELL (slow, sustained lift) arms a planned multi-bar arc: the next
+        # bars ramp density + velocity and land on a climax crash. One decision,
+        # deterministic execution — latency only gates when it starts, not how
+        # long it lasts.
+        if features.vertical > 0.6 and features.energy > 0.45 and features.duration > 0.8:
+            self._arc = self._arc_total
+            log.info("build arc armed: %d bars to climax", self._arc)
         self._decision = None                    # new intent — the model must re-decide
         self._model.request(self._context())
         self._queue_pickup(t_end_ms)
+
+    def _arc_step(self) -> tuple[float, float, bool]:
+        """Advance the build arc one bar: (vel_mult, density_floor, climax)."""
+        if self._arc <= 0:
+            return (1.0, 0.0, False)
+        p = 1.0 - (self._arc - 1) / self._arc_total   # 0.25 -> 0.5 -> 0.75 -> 1.0
+        self._arc -= 1
+        return (0.8 + 0.5 * p, min(1.0, 0.35 + 0.75 * p), p >= 1.0)
 
     def on_grab(self, kind: str, server_ms: float) -> None:
         pass  # grab edges could cut sustains; not needed for the slice
@@ -261,6 +279,7 @@ class Conductor:
 
     # --- bar generation ---
     def _bar_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
+        self._arc_now = self._arc_step()
         if self.song.parts:                      # a loaded MIDI: play its arrangement
             return self._arrangement_events(idx, bar_start)
         bar = self.song.bar(idx)
@@ -295,14 +314,17 @@ class Conductor:
             melody_sec = SECTION_ALL
             responder_secs = [SECTION_ALL]
 
+        vel_mult, _floor, climax = self._arc_now
         for (on, dur, midi, vel) in responder:
             at, d, note = bar_start + on * self.s16_ms, dur * self.s16_ms, _clampmidi(midi + shift)
             for sec in responder_secs:
-                events.append(self._note(sec, at, d, note, vel, art))
+                events.append(self._note(sec, at, d, note, min(1.0, vel * vel_mult), art))
 
         for (on, dur, midi) in bar.melody:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                      dur * self.s16_ms, midi, 0.9, "pluck"))
+        if climax:                               # the arc lands: a crash on the downbeat
+            events.append(self._note(SECTION_ALL, bar_start, self.s16_ms * 2, 49, 0.95, "drum"))
 
         log.info("bar %d -> %s [%s] (%d notes, shift %+d, %d sections)",
                  idx, choice, decision.source, len(responder), shift, n)
@@ -321,6 +343,9 @@ class Conductor:
         register. Drums thin too (a calm room drops toward the kick) but never
         transpose. Kept notes are the structurally strongest: long, loud, on-beat."""
         keep = self._DENSITY.get(decision.candidate, 0.8)
+        arc_mult, arc_floor, _climax = self._arc_now
+        if arc_floor > 0.0:                      # a build arc overrides thinning upward
+            keep = max(keep, arc_floor)
         if keep <= 0.0 or not notes:
             return []
         if keep >= 1.0:
@@ -330,7 +355,7 @@ class Conductor:
                             reverse=True)
             kept = sorted(ranked[:max(1, round(len(notes) * keep))])
         shift = 0 if is_drum else decision.semitones()
-        vel_scale = 0.75 + 0.45 * (self._gesture.energy if self._gesture else 0.0)
+        vel_scale = (0.75 + 0.45 * (self._gesture.energy if self._gesture else 0.0)) * arc_mult
         return [(on, dur, midi + shift, min(1.0, vel * vel_scale))
                 for (on, dur, midi, vel) in kept]
 
@@ -384,6 +409,8 @@ class Conductor:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                      dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,
                                      ART.get(choice, "pluck")))
+        if self._arc_now[2]:                     # the arc lands: a crash on the downbeat
+            events.append(self._note(SECTION_ALL, bar_start, self.s16_ms * 2, 49, 0.95, "drum"))
         log.info("bar %d arrangement: %d parts -> %d sections, shape=%s%s",
                  idx, len(self.song.parts), n, choice, f", solo={solo}" if solo else "")
         return events
