@@ -1,25 +1,23 @@
-# Freesolo Flash — stage 2: GRPO polish on top of the SFT adapter.
-#
-# Reward = environment.py:score_response (format + musical consistency).
-# `structured_outputs` embeds the decision schema (mirror of
-# server/ml/schema.py DECISION_SCHEMA) so the model cannot emit off-format
-# tokens during sampling — and it becomes the adapter's serving default.
-#
-# Quote first:   flash train freesolo/configs/rl.toml --cost
-# Start from the SFT run — check `flash env setup` / the docs for the exact
-# key name that chains runs (and reconcile all key names with the scaffold).
+# DECISION model — stage 2: GRPO against the reward in environment.py.
+# structured_outputs pins the decision schema so rollouts can't leave format.
+# After the SFT run finishes: set init_from_adapter = "<sft-run-id>" AND remove
+# lora_rank/lora_alpha (the source adapter's values are authoritative).
 
-model = "qwen3.5-2b"
+model = "Qwen/Qwen3.5-2B"
 algorithm = "grpo"
 
+[environment]
+id = "neuroscore/wand-decision"
+
 [train]
-max_steps = 300
-group_size = 8
-temperature = 0.7
-kl_penalty_coef = 0.01
+# init_from_adapter = "<sft-run-id>"   # <- fill in after SFT; then delete rank/alpha below
 lora_rank = 32
 lora_alpha = 64
-learning_rate = 5e-6
-batch_size = 4
-max_context_tokens = 512
+max_steps = 300
+max_examples = 600
+group_size = 8
+temperature = 0.7
+max_completion_tokens = 60
+kl_penalty_coef = 0.01
+max_context_tokens = 1024
 structured_outputs = '{"type":"object","properties":{"candidate":{"type":"string","enum":["lower_imitation","contrary_motion","sustained","delayed","rhythmic_dense","rest","generated"]},"octave_shift":{"type":"integer","enum":[-1,0,1]}},"required":["candidate","octave_shift"],"additionalProperties":false}'

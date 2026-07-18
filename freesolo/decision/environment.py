@@ -1,30 +1,38 @@
-"""Freesolo GRPO environment for the accompaniment decision model.
+"""Freesolo environment for the DECISION model (gesture -> accompaniment pick).
 
-score_response() is the reward. It runs on Freesolo's workers, not in this
-repo, so everything it needs is inlined (a faithful port of the server's
-heuristic scoring in server/ml/heuristic.py — keep them in sync by hand).
+The task: given musical context + the conductor's gesture (the prompt built by
+server/ml/schema.prompt_for), emit exactly {"candidate": ..., "octave_shift": ...}.
 
-Reward shape (0..1):
+Reward (0..1), a port of the server's heuristic prior (server/ml/heuristic.py —
+keep in sync by hand):
   0.35  perfectly formatted decision JSON (exactly the two schema keys)
   0.35  candidate consistency with the gesture, scaled between the worst and
         best candidate the heuristic would score for that context
   0.15  octave_shift matches the gesture's vertical intent
   0.15  keeps the music evolving (doesn't repeat the previous candidate)
 
-Reconcile with the scaffold `flash env setup` generates for your account:
-keep its load_environment() return shape and wire score_response in as the
-reward; the dataset sidecar is freesolo/dataset/ (build_dataset.py output).
+Dataset sidecar: dataset/{train,eval}.jsonl from server/tools/build_dataset.py.
 """
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+from freesolo.datasets import TaskExample
+from freesolo.environments import EnvironmentSingleTurn, RewardResult
+
+DEFAULT_DATASET_PATH = Path(__file__).parent / "dataset" / "train.jsonl"
 
 CANDIDATES = ["lower_imitation", "contrary_motion", "sustained", "delayed",
               "rhythmic_dense", "rest", "generated"]
 
 
+def load_jsonl(path):
+    with Path(path).open() as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
 def _context_from(prompt: str) -> dict | None:
-    """The prompt ends with 'Context: {...}' (see server/ml/schema.prompt_for)."""
     marker = "Context: "
     i = prompt.rfind(marker)
     if i < 0:
@@ -37,8 +45,6 @@ def _context_from(prompt: str) -> dict | None:
 
 
 def _candidate_scores(context: dict) -> dict[str, float]:
-    """Port of server/ml/heuristic.rank — the musical prior the model is
-    rewarded for respecting (and free to bend where SFT taught it taste)."""
     g = context.get("gesture")
     e = g.get("energy", 0.0) if g else 0.0
     size = g.get("size", 0.0) if g else 0.0
@@ -74,7 +80,7 @@ def _shift_consistency(context: dict, shift: int) -> float:
     return 1.0 if shift == want else 0.0
 
 
-def score_response(prompt: str, response: str) -> float:
+def reward(prompt: str, response: str) -> float:
     try:
         obj = json.loads(response)
     except (TypeError, ValueError):
@@ -85,14 +91,25 @@ def score_response(prompt: str, response: str) -> float:
     context = _context_from(prompt)
     if context is None:
         return 0.65  # formatted, but nothing to judge musically
-    reward = 0.35
-    reward += 0.35 * _consistency(context, obj["candidate"])
-    reward += 0.15 * _shift_consistency(context, obj["octave_shift"])
-    reward += 0.15 * (0.0 if obj["candidate"] == context.get("prev") else 1.0)
-    return min(1.0, reward)
+    r = 0.35
+    r += 0.35 * _consistency(context, obj["candidate"])
+    r += 0.15 * _shift_consistency(context, obj["octave_shift"])
+    r += 0.15 * (0.0 if obj["candidate"] == context.get("prev") else 1.0)
+    return min(1.0, r)
 
 
-def load_environment():
-    """Keep the return shape of the load_environment() that `flash env setup`
-    scaffolds for your account version; this dict form is a placeholder."""
-    return {"reward": score_response, "dataset": "dataset"}
+class DecisionEnv(EnvironmentSingleTurn):
+    dataset = load_jsonl(DEFAULT_DATASET_PATH)
+
+    def build_prompt_messages(self, example: TaskExample, prompt_text: str):
+        return [{"role": "user", "content": example.input}]
+
+    def score_response(self, example: TaskExample, response_text: str) -> RewardResult:
+        return RewardResult(score=reward(example.input, response_text), threshold=0.7)
+
+
+def load_environment(dataset_path: str | None = None, **kwargs) -> DecisionEnv:
+    env = DecisionEnv()
+    if dataset_path:
+        env.dataset = load_jsonl(dataset_path)
+    return env

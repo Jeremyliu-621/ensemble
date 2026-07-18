@@ -1,23 +1,23 @@
-# Freesolo Flash — bar-line model, stage 2: GRPO against environment.py.
-#
-# Reward = format + grid validity + in-key + register + style match + melody
-# clearance. structured_outputs mirrors server/ml/schema.py BAR_SCHEMA so the
-# model cannot emit off-format tokens while sampling (and it becomes the
-# serving default). Quote first:
-#   flash train freesolo/barline/configs/rl.toml --cost
-# Chain from the SFT run — check the docs for the exact key name.
+# BAR-LINE model — stage 2: GRPO against the musicality reward in environment.py.
+# structured_outputs pins the notes schema so rollouts can't leave format.
+# After the SFT run finishes: set init_from_adapter = "<sft-run-id>" AND remove
+# lora_rank/lora_alpha (the source adapter's values are authoritative).
 
-model = "qwen3.5-4b"
+model = "Qwen/Qwen3.5-4B"
 algorithm = "grpo"
 
+[environment]
+id = "neuroscore/wand-barline"
+
 [train]
-max_steps = 400
-group_size = 8
-temperature = 0.8
-kl_penalty_coef = 0.01
+# init_from_adapter = "<sft-run-id>"   # <- fill in after SFT; then delete rank/alpha below
 lora_rank = 32
 lora_alpha = 64
-learning_rate = 5e-6
-batch_size = 4
-max_context_tokens = 768
+max_steps = 400
+max_examples = 600
+group_size = 8
+temperature = 0.8
+max_completion_tokens = 300
+kl_penalty_coef = 0.01
+max_context_tokens = 1024
 structured_outputs = '{"type":"object","properties":{"notes":{"type":"array","maxItems":16,"items":{"type":"array","minItems":4,"maxItems":4,"items":{"type":"number"}}}},"required":["notes"],"additionalProperties":false}'
