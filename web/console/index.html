@@ -109,16 +109,12 @@
     #cambox { position: relative; aspect-ratio: 4/3; border-radius: 9px; overflow: hidden;
       border: 3px solid var(--ink); background: #191410; box-shadow: var(--shadow); }
     #camframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-    #camstart { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: .25rem;
-      align-items: center; justify-content: center; cursor: pointer; text-align: center; padding: .5rem;
+    #camhint { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: .3rem;
+      align-items: center; justify-content: center; text-align: center; padding: .5rem;
       background: #241c14; }
-    #camstart img { width: 74px; height: auto; margin-bottom: .1rem; }
-    #camstart .big { font: 700 9px var(--px-display); text-transform: uppercase; color: #f5ead2; }
-    #camstart .sub { font: 600 11px var(--px-body); color: #bfae94; line-height: 1.35; }
-    #camstart .go { margin-top: .3rem; padding: .4rem .7rem; border-radius: 7px; color: #fff;
-      font: 700 9px var(--px-display); text-transform: uppercase; background: var(--purple);
-      border: 2px solid #241c14; box-shadow: 2px 2px 0 rgba(0,0,0,.4); }
-    #camstart a { color: #c9b3ff; }
+    #camhint .big { font: 700 9px var(--px-display); text-transform: uppercase; color: #f5ead2; }
+    #camhint .sub { font: 600 11px var(--px-body); color: #bfae94; line-height: 1.35; }
+    #camhint a { color: #c9b3ff; }
     #campop { position: absolute; right: 5px; top: 5px; z-index: 4; color: #f5ead2; font-size: .85rem;
       text-decoration: none; text-shadow: 0 1px 3px #000; opacity: .7; }
     #campop:hover { opacity: 1; }
@@ -268,12 +264,7 @@
         <div id="cambox">
           <iframe id="camframe" title="webcam wand" allow="camera"></iframe>
           <a id="campop" href="../cvwand/" target="_blank" title="open camera full-size">⤢</a>
-          <div id="camstart">
-            <img src="../assets/pixel/hub_laptop.png" alt="">
-            <div class="big">Your hand is the wand</div>
-            <div class="sub">pinch = grab · wave = shape the music</div>
-            <div class="go">Enable camera</div>
-          </div>
+          <div id="camhint" hidden></div>
         </div>
       </div>
       <div id="roomqr">

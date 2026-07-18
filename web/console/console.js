@@ -461,25 +461,24 @@ function nudgeTempo(d) {
 el("tdown").addEventListener("click", () => nudgeTempo(-4));
 el("tup").addEventListener("click", () => nudgeTempo(4));
 
-// camera hub — MediaPipe is heavy, load only when asked
-el("camstart").addEventListener("click", async () => {
-  // Music can start regardless; the camera itself needs a secure page.
-  await ensureAudio();
-  if (!started) { started = true; conn.send({ t: P.ADMIN_CMD, cmd: "start" }); }
-  if (!window.isSecureContext) {
-    // Plain http on a LAN IP: the browser hides getUserMedia entirely. Steer to
-    // localhost (hosting laptop) — phones keep joining via the IP QR as usual.
-    const local = `http://localhost:${location.port || 80}${location.pathname}${location.search}`;
-    el("camstart").innerHTML =
-      `<div class="big">🔒 Camera needs localhost or HTTPS</div>
-       <div class="sub">On the hosting laptop open
-         <a href="${local}">localhost:${location.port || 80}</a>
-         — music still works here, and phones keep using the QR.</div>`;
-    return;
-  }
-  if (!camStarted) { el("camframe").src = `../cvwand/?s=${encodeURIComponent(session)}`; camStarted = true; }
-  el("camstart").hidden = true;
-});
+// camera hub — seamless: the camera wand is simply ON. The iframe loads at
+// boot (its page auto-starts the webcam; the browser's permission prompt is
+// the only gate). Insecure origins (LAN IP over http) get a quiet steer to
+// localhost instead — phones keep joining via the QR either way.
+if (window.isSecureContext) {
+  el("camframe").src = `../cvwand/?s=${encodeURIComponent(session)}`;
+  camStarted = true;
+} else {
+  const local = `http://localhost:${location.port || 80}${location.pathname}${location.search}`;
+  el("camhint").innerHTML =
+    `<div class="big">🔒 Camera needs localhost</div>
+     <div class="sub">On the hosting laptop open
+       <a href="${local}">localhost:${location.port || 80}</a>
+       — music still works here, and phones keep using the QR.</div>`;
+  el("camhint").hidden = false;
+}
+// Audio needs one real user gesture — take the first click/tap anywhere.
+window.addEventListener("pointerdown", () => { ensureAudio(); }, { once: true });
 
 // header Join button re-opens the QR card even with phones present
 el("joinbtn").addEventListener("click", () => {
