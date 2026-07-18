@@ -79,6 +79,24 @@ def main() -> int:
     print(f"    conductor status: song={c.status()['song']}, bars={c.status()['bars']}, playing")
     print(f"    a bar of events emitted: {len(ev)} notes")
 
+    print("[4] the conductor SHAPES the arrangement (calm thins it, energy opens it)")
+    from gesture_test import imu_window
+
+    def bar0_events(gesture):
+        c2 = Conductor()
+        c2.load_song(song, parts)
+        c2.on_transport("start", 0.0)
+        c2.on_gesture(gesture)
+        return c2.get_events(0.0, 0.0)
+
+    calm = bar0_events(imu_window(accel_mag=0.3, dur_s=0.25, n=10))
+    busy = bar0_events(imu_window(accel_mag=12.0, dur_s=0.5))
+    calm_drums = sum(1 for e in calm if e.art == "drum")
+    busy_drums = sum(1 for e in busy if e.art == "drum")
+    assert len(busy) > len(calm), f"energy should open the arrangement: {len(busy)} vs {len(calm)}"
+    assert 1 <= calm_drums < busy_drums == 8, f"drums should thin when calm ({calm_drums} vs {busy_drums})"
+    print(f"    busy bar {len(busy)} events ({busy_drums} drum hits) > calm bar {len(calm)} ({calm_drums} hits)")
+
     print("\nALL MIDI CHECKS PASSED ✓")
     return 0
 

@@ -260,11 +260,43 @@ class Conductor:
                  idx, choice, decision.source, len(responder), shift, n)
         return events
 
+    # How much of each loaded-MIDI part survives, per chosen candidate class.
+    # This is how the conductor bends the ACTUAL arrangement, not just an overlay:
+    # rest thins to melody-only, sustained is a sparse pad, rhythmic_dense opens
+    # everything up.
+    _DENSITY = {"rest": 0.0, "sustained": 0.4, "delayed": 0.6, "lower_imitation": 0.8,
+                "contrary_motion": 0.8, "generated": 0.8, "rhythmic_dense": 1.0}
+
+    def _shape(self, notes: list, decision: Decision, is_drum: bool) -> list:
+        """Bend one part's bar to the conductor: candidate class sets density,
+        gesture energy drives velocity, the decision's octave shift moves the
+        register. Drums thin too (a calm room drops toward the kick) but never
+        transpose. Kept notes are the structurally strongest: long, loud, on-beat."""
+        keep = self._DENSITY.get(decision.candidate, 0.8)
+        if keep <= 0.0 or not notes:
+            return []
+        if keep >= 1.0:
+            kept = list(notes)
+        else:
+            ranked = sorted(notes, key=lambda nt: nt[1] * 2 + nt[3] * 4 + (2 if nt[0] % 4 == 0 else 0),
+                            reverse=True)
+            kept = sorted(ranked[:max(1, round(len(notes) * keep))])
+        shift = 0 if is_drum else decision.semitones()
+        vel_scale = 0.75 + 0.45 * (self._gesture.energy if self._gesture else 0.0)
+        return [(on, dur, midi + shift, min(1.0, vel * vel_scale))
+                for (on, dur, midi, vel) in kept]
+
     def _arrangement_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
-        """Play a loaded MIDI's parts distributed across sections (round-robin;
-        laptop plays all via SECTION_ALL if no phones), plus the gesture layer
-        riding on the lead. Drum parts play through the synth's percussion
-        voice (art="drum") — a phone can be the kit."""
+        """Play a loaded MIDI's parts distributed across sections — bent to the
+        conductor via _shape (the melody part is the song's identity and plays
+        verbatim), plus the gesture layer riding on the lead. Drum parts play
+        through the synth's percussion voice (art="drum")."""
+        bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
+        cands = generate(bar, prev, self.song.key_root)
+        self._take_generated(idx, cands)
+        decision = self._decide(idx, cands)
+        choice, shift = decision.candidate, decision.semitones()
+
         events: list[NoteEvent] = []
         n = len(self._sections)
         melody_sec = SECTION_ALL
@@ -272,22 +304,18 @@ class Conductor:
             sec = SECTION_ALL if n == 0 else self._sections[i % n].section_id
             if part.is_melody:
                 melody_sec = sec
-            for (on, dur, midi, vel) in part.bars[idx % len(part.bars)]:
+            raw = part.bars[idx % len(part.bars)]
+            notes = raw if part.is_melody else self._shape(raw, decision, part.is_drum)
+            for (on, dur, midi, vel) in notes:
                 art = "drum" if part.is_drum else ("sustain" if dur >= 8 else "pluck")
                 events.append(self._note(sec, bar_start + on * self.s16_ms,
                                          dur * self.s16_ms, _clampmidi(midi), max(0.12, vel), art))
 
-        # Gesture/editor layer: a candidate built from the lead, riding on top.
-        bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
-        cands = generate(bar, prev, self.song.key_root)
-        self._take_generated(idx, cands)
-        decision = self._decide(idx, cands)
-        choice, shift = decision.candidate, decision.semitones()
         for (on, dur, midi, vel) in cands[choice]:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                      dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,
                                      ART.get(choice, "pluck")))
-        log.info("bar %d arrangement: %d parts -> %d sections, overlay=%s",
+        log.info("bar %d arrangement: %d parts -> %d sections, shape=%s",
                  idx, len(self.song.parts), n, choice)
         return events
 
