@@ -14,6 +14,16 @@ function noteToFreq(note) {
   return 440 * Math.pow(2, (noteToMidi(note) - 69) / 12);
 }
 
+// Real sampled instruments (FluidR3_GM renders in /assets/sf/, fetched by
+// server/tools/fetch_samples.sh). Samples exist every 3rd semitone; the player
+// detunes the nearest one. Instruments without samples fall back to oscillators.
+const SAMPLE_MAP = {
+  piano: "acoustic_grand_piano", violin: "violin", viola: "viola", cello: "cello",
+  flute: "flute", clarinet: "clarinet", trumpet: "trumpet", bass: "acoustic_bass",
+  harp: "orchestral_harp", bell: "music_box",
+};
+const FLATS = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
 // Rough instrument timbres: {oscillator wave, lowpass cutoff Hz}. Enough to make
 // a violin, cello, flute etc. read as distinct without samples.
 const TIMBRES = {
@@ -41,6 +51,30 @@ export class Synth {
 
   setInstrument(name) {
     this.timbre = TIMBRES[name] || null;
+    this.timbreName = name;
+  }
+
+  // Nearest sampled note for this instrument, or null (loading/missing —
+  // caller falls back to an oscillator, so audio never waits on a fetch).
+  _sample(inst, midi) {
+    const folder = SAMPLE_MAP[inst];
+    if (!folder) return null;
+    if (!this._samples) this._samples = {};
+    let sm = 36 + Math.round((midi - 36) / 3) * 3;
+    sm = Math.max(36, Math.min(96, sm));
+    const key = `${folder}/${FLATS[sm % 12]}${Math.floor(sm / 12) - 1}`;
+    const entry = this._samples[key];
+    if (entry === undefined) {
+      this._samples[key] = null;               // loading
+      fetch(`/assets/sf/${key}.mp3`)
+        .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status)))))
+        .then((ab) => this.ctx.decodeAudioData(ab))
+        .then((buf) => { this._samples[key] = { buffer: buf }; })
+        .catch(() => { this._samples[key] = { buffer: false }; });
+      return null;
+    }
+    if (!entry || !entry.buffer) return null;
+    return { buffer: entry.buffer, cents: (midi - sm) * 100 };
   }
 
   // Must be called inside a user gesture (autoplay policy).
@@ -97,6 +131,35 @@ export class Synth {
 
     const durSec = Math.max(0.08, (ev.dur || 200) / 1000);
     const sustain = ev.art === "sustain";
+
+    // Sampled path: the event names its instrument (a loaded MIDI part), or
+    // this device has one configured. Real recorded notes beat oscillators.
+    const inst = ev.inst || this.timbreName;
+    const smp = inst ? this._sample(inst, noteToMidi(ev.note)) : null;
+    if (smp) {
+      const src = this.ctx.createBufferSource();
+      src.buffer = smp.buffer;
+      src.detune.value = smp.cents + (this.exprSemis || 0) * 100;
+      const g = this.ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(peak, t + 0.012);
+      g.gain.setValueAtTime(peak, t + Math.max(0.012, durSec - 0.1));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + durSec + 0.08);
+      src.connect(g).connect(this.master);
+      src.start(t);
+      src.stop(t + durSec + 0.12);
+      this.scheduled.push(src);
+      src.onended = () => {
+        const i = this.scheduled.indexOf(src);
+        if (i >= 0) this.scheduled.splice(i, 1);
+      };
+      if (this.onPlay) {
+        const delay = ev.at - this.clock.serverNow();
+        setTimeout(() => this.onPlay(ev, peak), Math.max(0, delay));
+      }
+      return;
+    }
+
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = this.timbre ? this.timbre.wave : (sustain ? "sine" : "triangle");

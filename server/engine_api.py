@@ -51,7 +51,9 @@ class GestureWindow:
 class NoteEvent:
     """A scheduled note. `at` is server-time ms and MUST be >= now + MIN_LEAD_MS
     when returned from get_events. `section` may be SECTION_ALL to hit every section.
-    `note` is a scientific-pitch string (Tone/WebAudio-native, e.g. "C4")."""
+    `note` is a scientific-pitch string (Tone/WebAudio-native, e.g. "C4").
+    `inst` names the sampled instrument for this note (a loaded MIDI part's
+    voice); None lets the playing device use its own configured instrument."""
     id: str
     section: str
     at: float
@@ -59,6 +61,7 @@ class NoteEvent:
     note: str
     vel: float = 0.8
     art: str = "pluck"
+    inst: str | None = None
 
 
 @dataclass

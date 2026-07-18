@@ -425,13 +425,15 @@ class Conductor:
                 # Drum-map pitches are identifiers, not pitches - never clamp/fold them.
                 midi_out = midi if part.is_drum else _clampmidi(midi)
                 events.append(self._note(sec, bar_start + on * self.s16_ms,
-                                         dur * self.s16_ms, midi_out, max(0.12, vel), art))
+                                         dur * self.s16_ms, midi_out, max(0.12, vel), art,
+                                         inst=part.instrument))
 
         if not neutral:
+            lead_inst = next((p.instrument for p in self.song.parts if p.is_melody), "violin")
             for (on, dur, midi, vel) in cands[choice]:
                 events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                          dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,
-                                         ART.get(choice, "pluck")))
+                                         ART.get(choice, "pluck"), inst=lead_inst))
         if self._arc_now[2]:                     # the arc lands: a crash on the downbeat
             events.append(self._note(SECTION_ALL, bar_start, self.s16_ms * 2, 49, 0.95, "drum"))
         log.info("bar %d arrangement: %d parts -> %d sections, %s%s",
@@ -439,9 +441,10 @@ class Conductor:
                  "verbatim" if neutral else f"shape={choice}", f", solo={solo}" if solo else "")
         return events
 
-    def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str) -> NoteEvent:
+    def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str,
+              inst: str | None = None) -> NoteEvent:
         return NoteEvent(id=f"n{next(self._ids)}", section=section, at=at, dur=dur,
-                         note=midi_to_name(midi), vel=round(vel, 3), art=art)
+                         note=midi_to_name(midi), vel=round(vel, 3), art=art, inst=inst)
 
 
 def _clampmidi(m: int) -> int:
