@@ -60,6 +60,7 @@ const secInstrument = new Map();     // section id -> instrument (roll colours)
 let lastChoice = null;
 let curSong = null;                  // engine song identity (clears the drop's busy state)
 let dragging = null;                 // {key, moved, lastSend} during a card drag
+let wandYaw = null, wandGrabbed = false, wandSeen = 0;   // hardware-wand pointing beam
 
 // ── room coordinates: px ∈ [-1,1], py ∈ [0,1], hub at (0, 0.5) = map centre ──
 function roomBox() { const r = el("room").getBoundingClientRect(); return r; }
@@ -191,6 +192,23 @@ function drawLinks() {
     out += `<path d="${d}" stroke="${c}" stroke-opacity="${aimed ? 0.95 : 0.55}" stroke-width="${aimed ? 3.4 : 2}"/>`;
     out += `<path class="flow" d="${d}" stroke="#fbf2dd" stroke-opacity="${aimed ? 0.9 : 0.6}" stroke-width="${aimed ? 2 : 1.5}"/>`;
   });
+
+  // ── the wand's pointing beam: where the hardware wand aims, live ──────────
+  // wand.state carries yaw_deg on the SAME azimuth convention as placement
+  // (0 = top of the map, + = right), so the beam and the cards share one
+  // geometry — the card inside the ±40° lock cone glows via the engine's aim.
+  if (wandYaw !== null && performance.now() - wandSeen < 1500) {
+    const R = Math.hypot(r.width, r.height);
+    const at = (deg) => {
+      const a = (deg * Math.PI) / 180;
+      return { x: hub.x + R * Math.sin(a), y: hub.y - R * Math.cos(a) };
+    };
+    const tip = at(wandYaw), le = at(wandYaw - 40), re = at(wandYaw + 40);
+    const c = wandGrabbed ? "#3fae4a" : "#8a6d4f";
+    out += `<polygon points="${hub.x},${hub.y} ${le.x},${le.y} ${re.x},${re.y}" fill="${c}" fill-opacity="0.06" stroke="none"/>`;
+    out += `<line x1="${hub.x}" y1="${hub.y}" x2="${tip.x}" y2="${tip.y}" stroke="#362619" stroke-opacity="0.3" stroke-width="6"/>`;
+    out += `<line class="flow" x1="${hub.x}" y1="${hub.y}" x2="${tip.x}" y2="${tip.y}" stroke="${c}" stroke-opacity="0.95" stroke-width="3.4"/>`;
+  }
   el("links").innerHTML = out;
 }
 
@@ -444,6 +462,14 @@ conn.on(P.SCHED_NOTES, (m) => {
   }
 });
 conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
+// hardware-wand pointing: draw the live beam over the room (~7 Hz)
+conn.on(P.WAND_STATE, (m) => {
+  if (m.yaw_deg === undefined) return;
+  wandYaw = m.yaw_deg;
+  wandGrabbed = !!m.grabbed;
+  wandSeen = performance.now();
+  drawLinks();
+});
 
 conn.onOpen((welcome) => {
   // A fresh server process restarts its note-id counter; stale "seen" ids would

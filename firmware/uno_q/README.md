@@ -85,3 +85,21 @@ bridge process. Plug it in, it joins, and it starts streaming.
 Set the laptop address before running: `WAND_LAPTOP_IP=192.168.137.1` (the app
 reads it in `wand/python/config.py`). Open `wand/` in App Lab and Run, or deploy
 headless with `arduino-app-cli`.
+
+## Field calibration (no reflash)
+
+1. **Point the board at the laptop** and set `WAND_LAPTOP_IP` on the UNO Q to
+   the IP shown under the console's QR (the server prints it on startup).
+2. **Verify the pointing axis** — run `python server/tools/wand_watch.py` on
+   the laptop and sweep the wand slowly left → right. Yaw should climb
+   positive.
+   - Mirrored? restart the server with `WM_YAW_SIGN=-1`.
+   - Barely moves? the board is mounted off-axis: try `WM_YAW_AXIS=4` or `5`.
+3. **Squeeze to conduct** — covering the ToF sensor (< `WAND_GRAB_ON_MM`,
+   default 100 mm) opens the gesture window; uncovering (> 150 mm) releases.
+   Tension ramps as the hand approaches, peaking while grabbed.
+4. **Drift** — the IMU has no compass; yaw drifts over minutes. Point the wand
+   at the laptop and send `wand.recal` (see python/phone_select.py) to re-zero.
+5. The console draws the live pointing beam + ±40° lock cone over the room —
+   the card inside the cone glows. If the beam is missing, no `wand.imu` is
+   arriving (check step 1).

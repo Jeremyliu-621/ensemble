@@ -6,8 +6,17 @@ ignored, so a gesture is exactly what happened between grab-start and grab-end.
 from __future__ import annotations
 
 import logging
+import os
 
 from engine_api import GestureWindow, MusicEngine
+
+# On-site aiming calibration, NO reflash needed. The board's mounting decides
+# which gyro channel is the pointing axis and its sign: sweep the wand slowly
+# left->right while watching tools/wand_watch.py — yaw should climb positive.
+#   mirrored?     WM_YAW_SIGN=-1
+#   barely moves? WM_YAW_AXIS=4 or 5 (frame index: 4=gx, 5=gy, 6=gz)
+YAW_AXIS = int(os.environ.get("WM_YAW_AXIS", "6"))
+YAW_SIGN = float(os.environ.get("WM_YAW_SIGN", "1"))
 
 log = logging.getLogger("wand")
 
@@ -94,7 +103,7 @@ class WandAimer:
             if len(f) < 7:
                 continue
             try:
-                tw, gz = float(f[0]), float(f[6])
+                tw, gz = float(f[0]), float(f[YAW_AXIS]) * YAW_SIGN
             except (TypeError, ValueError):
                 continue
             if self._last_tw is not None:

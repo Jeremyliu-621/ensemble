@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from collections import deque
 
 import websockets
@@ -42,6 +43,7 @@ class WandLink:
         self._seq = 0
         self._range: float | None = None    # latest ToF mm from the MCU, if new
         self._ws = None                      # live socket; None between reconnects
+        self._grabbed = False               # squeeze-to-conduct state (ToF-derived)
 
     # --- MCU uplink ingress (Bridge callback; may fire off-thread) ---
     def _on_imu(self, payload) -> None:
@@ -92,6 +94,7 @@ class WandLink:
             try:
                 async with connect(config.WS_URL) as ws:
                     self._ws = ws
+                    self._grabbed = False   # a reconnect must not strand a grab
                     await self._handshake(ws)
                     log.info("wand link up -> %s (client_id=%s)",
                              config.WS_URL, self.state.client_id)
@@ -123,9 +126,25 @@ class WandLink:
             mm = self._take_range()
             if mm is not None:
                 await ws.send(json.dumps({"t": "wand.range", "mm": mm}))
+                await self._squish_grab(ws, mm)
                 sent = True
             if not sent:
                 await asyncio.sleep(0.005)
+
+    # Squeeze-to-conduct: covering the ToF (< GRAB_ON_MM) = grab start, so the
+    # server buffers the IMU that follows into a gesture window; uncovering
+    # (> GRAB_OFF_MM) releases it. Without this the hardware wand can wave
+    # forever and the engine never hears a gesture.
+    async def _squish_grab(self, ws, mm: float) -> None:
+        tw = int(time.monotonic() * 1000)
+        if not self._grabbed and 0 < mm < config.GRAB_ON_MM:
+            self._grabbed = True
+            await ws.send(json.dumps({"t": "wand.grab", "state": "start", "tw": tw}))
+            log.info("squish grab START (%.0fmm)", mm)
+        elif self._grabbed and mm > config.GRAB_OFF_MM:
+            self._grabbed = False
+            await ws.send(json.dumps({"t": "wand.grab", "state": "end", "tw": tw}))
+            log.info("squish grab END (%.0fmm)", mm)
 
     async def _downlink(self, ws) -> None:
         async for raw in ws:
