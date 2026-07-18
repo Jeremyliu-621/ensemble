@@ -71,6 +71,10 @@ ASSETS: dict[str, tuple] = {
     "valance": ("a grand ornate deep red velvet theater curtain valance swag pelmet across the top, "
                 "scalloped, heavy gold fringe and tassels, a single isolated object, plain background",
                 256, 144, True, None, False),
+    "curtain_closed": ("a deep red velvet theater stage curtain fully closed across the whole stage, "
+                       "hanging straight down in heavy rich vertical folds from top to bottom, an "
+                       "ornate scalloped gold valance across the top and gold fringe along the bottom, "
+                       "filling the entire wide frame", 448, 256, False, "rd_plus__environment", False),
 
     # ---- Lights, sparkle & signage (the extravagance) ----
     "chandelier": ("a magnificent ornate golden crystal chandelier glowing with warm candlelight, "

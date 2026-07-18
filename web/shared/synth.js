@@ -5,11 +5,44 @@
 
 const SEMI = { C: 0, "C#": 1, D: 2, "D#": 3, E: 4, F: 5, "F#": 6, G: 7, "G#": 8, A: 9, "A#": 10, B: 11 };
 
-function noteToFreq(note) {
+function noteToMidi(note) {
   const m = /^([A-G]#?)(-?\d+)$/.exec(note);
-  if (!m) return 440;
-  const midi = (parseInt(m[2], 10) + 1) * 12 + SEMI[m[1]];
-  return 440 * Math.pow(2, (midi - 69) / 12);
+  return m ? (parseInt(m[2], 10) + 1) * 12 + SEMI[m[1]] : 69;
+}
+function noteToFreq(note) {
+  return 440 * Math.pow(2, (noteToMidi(note) - 69) / 12);
+}
+
+// Percussion by General-MIDI drum-map pitch: kick = pitched thump, snare = noisy
+// body, hats/cymbals = short high noise.
+function drumHit(ctx, out, t, note, vel) {
+  const midi = noteToMidi(note);
+  const g = ctx.createGain();
+  g.connect(out);
+  if (midi <= 37) {                       // 35/36 kick
+    const o = ctx.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(150, t);
+    o.frequency.exponentialRampToValueAtTime(45, t + 0.11);
+    g.gain.setValueAtTime(Math.min(1, vel), t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+    o.connect(g); o.start(t); o.stop(t + 0.18);
+    return o;
+  }
+  const hat = midi >= 42;                  // 42/44/46 hats, 49/51 cymbals
+  const dur = hat ? 0.05 : 0.13;
+  const buf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const f = ctx.createBiquadFilter();
+  f.type = hat ? "highpass" : "bandpass";
+  f.frequency.value = hat ? 8000 : 1900;
+  g.gain.setValueAtTime(vel * 0.7, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(f).connect(g); src.start(t); src.stop(t + dur);
+  return src;
 }
 
 // Rough instrument timbres: {oscillator wave, lowpass cutoff Hz}. Enough to make
@@ -65,10 +98,21 @@ export class Synth {
     const now = this.ctx.currentTime;
     if (when < now - 0.05) return;          // hopelessly late — drop
     const t = Math.max(when, now + 0.001);
-    const durSec = Math.max(0.08, (ev.dur || 200) / 1000);
-    const sustain = ev.art === "sustain";
     const peak = Math.max(0.05, ev.vel || 0.7);
 
+    if (ev.art === "drum") {               // percussion, independent of the section instrument
+      const src = drumHit(this.ctx, this.master, t, ev.note, peak);
+      this.scheduled.push(src);
+      src.onended = () => { const i = this.scheduled.indexOf(src); if (i >= 0) this.scheduled.splice(i, 1); };
+      if (this.onPlay) {
+        const delay = ev.at - this.clock.serverNow();
+        setTimeout(() => this.onPlay(ev, peak), Math.max(0, delay));
+      }
+      return;
+    }
+
+    const durSec = Math.max(0.08, (ev.dur || 200) / 1000);
+    const sustain = ev.art === "sustain";
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = this.timbre ? this.timbre.wave : (sustain ? "sine" : "triangle");

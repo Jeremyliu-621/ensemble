@@ -181,15 +181,17 @@ class Conductor:
         events: list[NoteEvent] = []
         n = len(self._sections)
         melody_sec = SECTION_ALL
-        playable = [p for p in self.song.parts if not p.is_drum]   # no percussion voice yet
-        for i, part in enumerate(playable):
+        for i, part in enumerate(self.song.parts):
             sec = SECTION_ALL if n == 0 else self._sections[i % n].section_id
             if part.is_melody:
                 melody_sec = sec
             for (on, dur, midi, vel) in part.bars[idx % len(part.bars)]:
-                art = "sustain" if dur >= 8 else "pluck"
+                # Drum notes carry art="drum": the synth plays them as percussion by
+                # MIDI drum-map pitch, independent of the section's instrument timbre.
+                art = "drum" if part.is_drum else ("sustain" if dur >= 8 else "pluck")
+                midi_out = midi if part.is_drum else _clampmidi(midi)
                 events.append(self._note(sec, bar_start + on * self.s16_ms,
-                                         dur * self.s16_ms, _clampmidi(midi), max(0.12, vel), art))
+                                         dur * self.s16_ms, midi_out, max(0.12, vel), art))
 
         # Gesture/editor layer: a candidate built from the lead, riding on top.
         bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
@@ -204,7 +206,7 @@ class Conductor:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                      dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,
                                      ART.get(choice, "pluck")))
-        log.info("bar %d arrangement: %d parts -> %d sections, overlay=%s", idx, len(playable), n, choice)
+        log.info("bar %d arrangement: %d parts -> %d sections, overlay=%s", idx, len(self.song.parts), n, choice)
         return events
 
     def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str) -> NoteEvent:
