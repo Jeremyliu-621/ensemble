@@ -26,11 +26,6 @@ const INDEX_PIP = 6, MIDDLE_TIP = 12, MIDDLE_PIP = 10, RING_TIP = 16, RING_PIP =
 // Pinch hysteresis: grab when the thumb–index gap (relative to hand width) drops
 // below GRAB_ON, release when it rises above GRAB_OFF. Two thresholds prevent flicker.
 const GRAB_ON = 0.55, GRAB_OFF = 0.80;
-// Deliberateness: the camera is ALWAYS on, so a resting hand or a tracking
-// flicker must never conduct. A pinch only becomes a grab after it has been
-// held closed for GRAB_STABLE consecutive frames AND MIN_GRAB_MS of wall time;
-// release needs RELEASE_STABLE open frames. Shorter pinches send NOTHING.
-const GRAB_STABLE = 5, RELEASE_STABLE = 3, MIN_GRAB_MS = 350;
 
 const POSE_BATCH = 4;         // frames per wand.pose packet
 const TRAIL_LEN = 48;
@@ -51,7 +46,6 @@ let seq = 0;
 let poseBuf = [];
 const trail = [];             // {xm, y, grabbed}
 let palmSince = 0, palmXs = [], lastTransport = 0, playing = true;
-let pinchOn = 0, pinchOff = 0, grabCandidate = 0;   // deliberate-pinch counters
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
@@ -84,10 +78,6 @@ async function boot() {
       baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
       runningMode: "VIDEO",
       numHands: 1,
-      // higher floors: a marginal half-detected hand must not conduct
-      minHandDetectionConfidence: 0.6,
-      minHandPresenceConfidence: 0.6,
-      minTrackingConfidence: 0.6,
     });
     el("loading").hidden = true;
 
@@ -152,19 +142,9 @@ function processHand(lm, now) {
   const handW = dist(lm[INDEX_MCP], lm[PINKY_MCP]) || 0.001;
   const pinchRatio = dist(lm[THUMB_TIP], lm[INDEX_TIP]) / handW;
 
-  // Grab state machine: stability-gated on BOTH edges (see constants above).
-  if (!grabbed) {
-    if (pinchRatio < GRAB_ON) {
-      pinchOn++;
-      if (pinchOn === GRAB_STABLE) grabCandidate = now;
-      if (grabCandidate && now - grabCandidate >= MIN_GRAB_MS) startGrab(grabCandidate);
-    } else { pinchOn = 0; grabCandidate = 0; }
-  } else if (pinchRatio > GRAB_OFF) {
-    pinchOff++;
-    if (pinchOff >= RELEASE_STABLE) endGrab(now);
-  } else {
-    pinchOff = 0;
-  }
+  // Grab state machine (hysteresis).
+  if (!grabbed && pinchRatio < GRAB_ON) startGrab(now);
+  else if (grabbed && pinchRatio > GRAB_OFF) endGrab(now);
 
   // Pose frame: mirror x for a selfie-natural feel; roll from wrist->middle-MCP.
   const xm = 1 - tip.x;
@@ -197,7 +177,7 @@ function handlePalm(open, xm, now) {
     return;
   }
   if (!palmSince) palmSince = now;
-  else if (now - palmSince > 900) {              // hold: stop / start (deliberate)
+  else if (now - palmSince > 600) {              // hold: stop / start
     playing = !playing;
     send({ t: P.ADMIN_CMD, cmd: playing ? "start" : "stop" });
     lastTransport = now; palmSince = 0;
@@ -223,12 +203,10 @@ function flushPose() {
 
 function startGrab(now) {
   grabbed = true;
-  pinchOff = 0;
   send({ t: P.WAND_GRAB, state: "start", tw: Math.round(now) });
 }
 function endGrab(now) {
   grabbed = false;
-  pinchOn = 0; pinchOff = 0; grabCandidate = 0;
   flushPose();
   send({ t: P.WAND_GRAB, state: "end", tw: Math.round(now) });
 }

@@ -11,8 +11,7 @@ from engine_api import GestureWindow, MusicEngine
 
 log = logging.getLogger("wand")
 
-MIN_FRAMES = 12       # a real gesture at ~30fps; micro-pinches are noise
-MIN_WINDOW_MS = 350.0  # anything shorter is a tracking flicker, not a move
+MIN_FRAMES = 3       # windows shorter than this are dropped as noise
 MAX_FRAMES = 20_000  # a grab left open by a dropped wand stops growing here (~5 min @ 60Hz)
 
 
@@ -57,11 +56,7 @@ class WandRouter:
             self._t_start = server_ms
         elif kind == "end":
             self._grabbing = False
-            dur = server_ms - self._t_start
-            if self._modality and (len(self._frames) < MIN_FRAMES or dur < MIN_WINDOW_MS):
-                log.info("gesture window dropped as noise: %d frames, %.0fms",
-                         len(self._frames), dur)
-            elif self._modality and len(self._frames) >= MIN_FRAMES:
+            if self._modality and len(self._frames) >= MIN_FRAMES:
                 window = GestureWindow(
                     modality=self._modality,
                     frames=self._frames,

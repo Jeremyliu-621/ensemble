@@ -204,15 +204,6 @@ class Conductor:
         return g is not None and g.energy > 0.65 and 0.0 < g.duration < 0.4
 
     def _gesture_in(self, features: GestureFeatures, t_end_ms: float) -> None:
-        # Deliberateness gate: an accidental pinch (a resting hand, a tracking
-        # flicker in front of the always-on camera) produces a window with
-        # almost no PATH. Noise must never steer the envelope — that's how the
-        # song "swells by itself" while real gestures feel fake. A deliberate
-        # calm gesture still passes: slow hushes move little but they MOVE.
-        if features.size < 0.08 and features.energy < 0.15:
-            log.info("gesture ignored — no intent (size %.2f, energy %.2f)",
-                     features.size, features.energy)
-            return
         self._gesture = features
         # Push the conducting envelope: the gesture's vigor becomes the target
         # intensity the orchestra chases (and then relaxes from). Two shapes are
