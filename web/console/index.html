@@ -148,10 +148,11 @@
     .card.ghost .box { border-style: dashed; opacity: .85; }
     .card.dropped { filter: grayscale(.75) opacity(.65); }
 
-    /* in-room hints */
-    #roomqr { position: absolute; left: 50%; top: 77%; transform: translate(-50%, -50%); z-index: 7;
-      text-align: center; padding: .7rem .8rem; background: var(--card); border: var(--border);
-      border-radius: 10px; box-shadow: var(--shadow); }
+    /* in-room hints. The QR lives permanently in the top-right corner —
+       anyone can walk up and scan, no button to find first. */
+    #roomqr { position: absolute; right: 12px; top: 12px; z-index: 4;
+      text-align: center; padding: .55rem .65rem; background: var(--card); border: var(--border);
+      border-radius: 10px; box-shadow: 2px 2px 0 rgba(54,38,25,.2); }
     #roomqr #qr { width: 116px; height: 116px; background: #fff; padding: 5px; border-radius: 4px;
       border: 2px solid var(--card-deep); margin: 0 auto; }
     #roomqr #qr svg { width: 100%; height: 100%; display: block; }
@@ -247,7 +248,6 @@
       <button class="tickbtn" id="tdown" title="slower">−</button>
       <button class="tickbtn" id="tup" title="faster">+</button>
     </div>
-    <button class="tbtn" id="joinbtn">📱 Join on phone</button>
     <nav id="nav">
       <a href="../editor/" target="_blank" title="drop a MIDI, edit the piano roll">🎹 editor</a>
     </nav>

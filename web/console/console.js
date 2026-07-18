@@ -241,7 +241,6 @@ function renderRoster(m) {
   // keep aim in sync if the aimed group vanished
   if (aimedGroup && !groups.some((g) => g.key === aimedGroup)) aimedGroup = null;
   upsertCards();
-  el("roomqr").hidden = sections.length > 0 && el("roomqr").dataset.user !== "open";
   el("roomhint").hidden = sections.length === 0;
   applyEngine(m.engine);
 }
@@ -470,13 +469,6 @@ if (window.isSecureContext) {
 // Audio needs one real user gesture — take the first click/tap anywhere.
 window.addEventListener("pointerdown", () => { ensureAudio(); }, { once: true });
 
-// header Join button re-opens the QR card even with phones present
-el("joinbtn").addEventListener("click", () => {
-  const q = el("roomqr");
-  const show = q.hidden;
-  q.hidden = !show;
-  q.dataset.user = show ? "open" : "";
-});
 
 // ── MIDI drop (replaces the song, live) ──────────────────────────────────────
 // Same path the editor uses: base64 the file, send SONG_LOAD; the server parses
