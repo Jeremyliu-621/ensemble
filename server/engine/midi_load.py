@@ -26,7 +26,8 @@ def gm_instrument(program: int, is_drum: bool) -> str:
         return "drums"
     table = [
         (0, 8, "piano"), (8, 16, "bell"), (16, 24, "synth"), (24, 32, "piano"),
-        (32, 40, "bass"), (40, 42, "violin"), (42, 44, "cello"), (44, 46, "viola"),
+        (32, 40, "bass"), (40, 42, "violin"), (42, 44, "cello"), (44, 45, "viola"),
+        (45, 46, "harp"),   # pizzicato strings: plucked — the harp samples, not a bowed viola
         (46, 47, "harp"), (47, 56, "violin"), (56, 64, "trumpet"), (64, 72, "clarinet"),
         (72, 80, "flute"),
     ]
@@ -163,9 +164,12 @@ def load_midi_bytes(data: bytes, name: str = "uploaded") -> tuple[Song, list[dic
             b = s // bar_ticks
             if b >= n_bars:
                 continue
-            onset16 = round((s - b * bar_ticks) / six)
+            # 64th-note resolution (quarter-16th floats): fast runs and arpeggios
+            # keep their flow instead of clumping onto a coarse grid, and notes
+            # may ring past the barline (up to 4 bars) like a real sequencer.
+            onset16 = round((s - b * bar_ticks) / six * 4) / 4
             if 0 <= onset16 < 16:
-                dur16 = max(1, min(16 - onset16, round(d / six)))
+                dur16 = max(0.25, min(64 - onset16, round(d / six * 4) / 4))
                 part_bars[b].append((onset16, dur16, pitch, round(vel / 127, 2)))
         for pb in part_bars:
             pb.sort()

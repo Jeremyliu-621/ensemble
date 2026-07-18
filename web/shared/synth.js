@@ -143,11 +143,13 @@ export class Synth {
       const g = this.ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(peak, t + 0.012);
-      g.gain.setValueAtTime(peak, t + Math.max(0.012, durSec - 0.1));
-      g.gain.exponentialRampToValueAtTime(0.0001, t + durSec + 0.08);
+      // Plucked notes ring naturally past their notated length, like a pedal.
+      const tail = sustain ? 0.1 : 0.4;
+      g.gain.setValueAtTime(peak, t + Math.max(0.012, durSec - 0.05));
+      g.gain.exponentialRampToValueAtTime(0.0001, t + durSec + tail);
       src.connect(g).connect(this.master);
       src.start(t);
-      src.stop(t + durSec + 0.12);
+      src.stop(t + durSec + tail + 0.05);
       this.scheduled.push(src);
       src.onended = () => {
         const i = this.scheduled.indexOf(src);
