@@ -144,7 +144,9 @@ async def run() -> int:
     print("[6] build_bar_dataset synthetic rows are playable Freesolo rows")
     import build_bar_dataset as bbd
     rows = bbd.to_freesolo(bbd.synth_rows(60, random.Random(2)))
-    assert len(rows) == 60
+    # The self-validation gate may reject generator/reward-mismatch rows
+    # (that's its job) — but most rows must survive it.
+    assert len(rows) >= 45, f"gate rejected too many: {len(rows)}/60"
     for r in rows:
         assert set(r) == {"input", "output"} and "Context: " in r["input"]
         assert sanitize_line(json.loads(r["output"]), 0) is not None

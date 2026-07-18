@@ -37,6 +37,7 @@ from config import (
     HTTP_PORT,
     HTTPS_PORT,
     PROTOCOL_VERSION,
+    SECTION_GRACE_S,
     SESSION_FILE,
     WS_PATH,
 )
@@ -182,6 +183,25 @@ class App:
 
     async def _on_hello(self, ws: ServerConnection, hello: dict, role: str) -> ClientConn:
         client_id = hello.get("client_id") or uuid.uuid4().hex
+        stale = self.hub.get(client_id)
+        if stale is not None and stale.ws is not ws:
+            if role in ("stage", "admin"):
+                # Two dashboard tabs sharing a persisted id (a duplicated console
+                # tab) must NOT evict each other: eviction -> the loser reconnects
+                # -> it evicts the winner -> a 1 Hz mutual reconnect storm where
+                # each tab's socket lives ~1s and both starve of broadcasts (the
+                # "piano roll empty while audio plays" bug). Views hold no
+                # server-side state, so just give the newcomer its own identity
+                # and let every tab live.
+                client_id = uuid.uuid4().hex
+                log.info("stage id collision -> new identity %s", client_id[:8])
+            else:
+                # Sections/wand own a singular slot: a reconnect while the old
+                # socket lingers (phone woke before the ping timeout) means the
+                # old socket is a zombie — close it. Its disconnect handler
+                # no-ops thanks to the identity guard.
+                log.info("closing stale socket for %s (reconnect)", client_id[:8])
+                asyncio.create_task(self._close_quietly(stale.ws))
         conn = ClientConn(client_id=client_id, role=role, ws=ws, name=hello.get("name", ""))
         self.hub.register(conn)
 
@@ -202,11 +222,11 @@ class App:
             self.announcer.poke("wand.connect", f"The conductor's wand just came alive ({variant}).")
             log.info("wand connected (variant=%s)", variant)
         elif role in ("stage", "admin"):
-            # Phone wand is parked for now, so the stage QR means "join as an
+            # Phone wand is parked for now, so the console QR means "join as an
             # instrument" — over plain http (no secure context / cert warning
-            # needed for audio). `wand_url` is the key the stage QR reads.
-            # (To re-enable the wand later, point this at https://.../join/ — the
-            # choice page still exists.)
+            # needed for audio). `wand_url` is the key the console QR reads.
+            # (To re-enable the phone wand later, point this at
+            # https://.../wandsim/ on :8443 — that page still exists.)
             http_base = f"http://{format_url_host(self.lan_ip)}:{HTTP_PORT}"
             config["wand_url"] = f"{http_base}/section/?s={self.session.name}"
             config["join_url"] = f"{http_base}/section/?s={self.session.name}"
@@ -221,25 +241,34 @@ class App:
             "server_time": server_time_ms(),
             "config": config,
         })
-        await self._broadcast_roster()
+        # Keep the engine's routing in lockstep with the roster from the very
+        # first hello (not just from SECTION_READY) — same single path as every
+        # other roster mutation.
+        await self._sections_changed()
         if role in P.WAND_ROLES:
             await self._notify_wand()           # sync the board to current state on connect
         return conn
 
     def _bind_section(self, conn: ClientConn) -> Section:
         """Reuse an existing (possibly disconnected) section for this client_id,
-        else create a fresh one."""
+        else create a fresh one. Either way the phone ends up on an instrument
+        the current song actually contains (transport running or not)."""
+        insts = self.engine.part_instruments()
         for s in self.session.sections.values():
             if s.client_id == conn.client_id:
                 s.connected = True
                 s.dropped_at = None
+                if insts and s.instrument not in insts:   # song changed while away
+                    s.instrument = self.session.deal_instrument(insts)
+                    log.info("section %s re-dealt to %s on rejoin", s.section_id, s.instrument)
                 log.info("section %s rejoined as %s", s.section_id, conn.client_id[:8])
                 return s
         sid = self.session.new_section_id()
-        section = Section(section_id=sid, client_id=conn.client_id)
+        section = Section(section_id=sid, client_id=conn.client_id,
+                          instrument=self.session.deal_instrument(insts))
         self.session.sections[sid] = section
         self._save_session()
-        log.info("section %s created for %s", sid, conn.client_id[:8])
+        log.info("section %s created for %s (instrument=%s)", sid, conn.client_id[:8], section.instrument)
         return section
 
     async def _message_loop(self, conn: ClientConn) -> None:
@@ -315,14 +344,19 @@ class App:
                 section = self.session.sections[conn.section_id]
                 first_ready = not section.ready
                 section.ready = True
-                self.engine.on_sections_changed(self.session.engine_sections())
                 if first_ready:
                     self.showlog.record("section.join", section=conn.section_id,
                                         instrument=section.instrument)
                     self.announcer.poke("section.join",
                                         f"Phone section {conn.section_id} joined as {section.instrument} — "
                                         f"{len(self.session.engine_sections())} sections live.")
-                await self._broadcast_roster()
+                await self._sections_changed()
+            return
+
+        if t == P.SECTION_LEAVE:
+            # Explicit goodbye (the phone's Leave button): free the slot right away,
+            # no grace period.
+            await self._remove_section(conn.section_id, "left")
             return
 
         # The performer's other hand: CV-palm / wand hardware may drive transport
@@ -401,7 +435,7 @@ class App:
             await self._assign_instrument(msg.get("section_id"), msg.get("instrument"))
             return
         if t == P.STAGE_PLACE:
-            await self._place_section(msg.get("section_id"), msg.get("azimuth_deg"))
+            await self._place_section(msg.get("section_id"), msg.get("px"), msg.get("py"))
             return
         if t == P.STAGE_RECORD:                 # finished room recording -> ledger
             self.showlog.record("recording", sha256=str(msg.get("sha256", ""))[:64],
@@ -411,6 +445,9 @@ class App:
             return
         if t == P.SONG_LOAD:
             await self._load_song(conn, msg.get("name", "uploaded"), msg.get("data", ""))
+            return
+        if t == P.SONG_EDIT:
+            await self._apply_edit(conn, msg.get("song") or {})
             return
         if t == P.SONG_HUM:                     # a hummed melody becomes the song
             await self._load_hum(conn, msg.get("frames", []))
@@ -456,6 +493,19 @@ class App:
             self.engine.set_tempo(float(args.get("bpm", 100)))
         elif cmd == "force":
             self.engine.set_forced(args.get("candidate"))
+        elif cmd == "aim":
+            sid = args.get("section_id")
+            self.engine.on_aim(sid if sid and sid != "all" else None)
+        elif cmd == "volume":
+            sec = self.session.sections.get(args.get("section_id"))
+            if sec:
+                sec.volume = max(0.0, min(1.0, float(args.get("volume", 1.0))))
+                self.engine.on_sections_changed(self.session.engine_sections())
+        elif cmd == "mute":
+            sec = self.session.sections.get(args.get("section_id"))
+            if sec:
+                sec.muted = bool(args.get("muted"))
+                self.engine.on_sections_changed(self.session.engine_sections())
         elif cmd == "record":
             if args.get("action") == "start":
                 self.recorder.start(args.get("label", ""))
@@ -463,6 +513,19 @@ class App:
                 self.recorder.stop()
         await self._broadcast_roster()
         await self._notify_wand()               # pause/play reaches the board's LED
+
+    async def _sync_instruments_to_song(self) -> None:
+        """After ANY song change (MIDI drop or live edit): re-align phones to the
+        new parts (minimal moves — see session.reconcile_instruments), tell each
+        changed phone, and refresh routing. Never consults the transport state:
+        matching works the same whether the song has started or not."""
+        for section in self.session.reconcile_instruments(self.engine.part_instruments()):
+            log.info("section %s re-dealt to %s (song change)", section.section_id, section.instrument)
+            c = self.hub.get(section.client_id)
+            if c:
+                await send_json(c.ws, {"t": P.SECTION_CONFIG, "section_id": section.section_id,
+                                       "instrument": section.instrument})
+        await self._sections_changed()
 
     async def _load_song(self, conn: ClientConn, name: str, b64: str) -> None:
         from engine.midi_load import load_midi_bytes
@@ -477,24 +540,41 @@ class App:
             self.announcer.poke("song.load",
                                 f"New song dropped: '{song.name}', {len(song.bars)} bars, "
                                 f"{len(tracks)} parts, {song.bpm:.0f} BPM.")
-            # Auto-assign instruments so each phone becomes one of the MIDI's parts.
-            playable = [t for t in tracks if not t["is_drum"]]
-            ready = [s for s in self.session.sections.values() if s.connected]
-            for j, section in enumerate(ready):
-                if j < len(playable):
-                    section.instrument = playable[j]["instrument"]
-                    c = self.hub.get(section.client_id)
-                    if c:
-                        await send_json(c.ws, {"t": P.SECTION_CONFIG, "section_id": section.section_id,
-                                               "instrument": section.instrument})
-            self.engine.on_sections_changed(self.session.engine_sections())
-            await self._broadcast_roster()
+            # Re-deal phones onto the new song's parts (minimal moves, doubling).
+            await self._sync_instruments_to_song()
             # The LLM arranger (async, best-effort) regroups parts by musical role.
-            ready_ids = [s.section_id for s in ready]
+            ready_ids = [s.section_id for s in self.session.sections.values() if s.connected]
             asyncio.create_task(self._arrange(tracks, ready_ids))
         except Exception as e:  # noqa: BLE001 - report parse failures to the uploader
             log.warning("midi load failed for %r: %s", name, e)
             await send_json(conn.ws, {"t": P.ERR, "code": "bad_midi", "msg": str(e)})
+
+    async def _apply_edit(self, conn: ClientConn, song_json: dict) -> None:
+        """Editor pushed hand-edited notes: rebuild the Song and swap it in WITHOUT
+        restarting playback (reanchor=False) so an edit lands on the next bar."""
+        from engine.midi_load import build_song_from_grid
+        try:
+            parts = song_json.get("parts") or []
+            bpm = float(song_json.get("bpm") or self.engine.bpm)
+            name = song_json.get("name") or "edited"
+            song, tracks = build_song_from_grid(parts, bpm, name)
+            self.engine.update_song(song, tracks, reanchor=False)
+            log.info("song edited: %s (%d bars, %d parts)", song.name, len(song.bars), len(tracks))
+            await self._sync_instruments_to_song()
+        except Exception as e:  # noqa: BLE001 - report bad edits back to the editor
+            log.warning("song edit failed: %s", e)
+            await send_json(conn.ws, {"t": P.ERR, "code": "bad_edit", "msg": str(e)})
+
+    async def _place_section(self, section_id: str, px, py) -> None:
+        """User dragged a phone onto the seating map. Store its spot + azimuth so
+        the wand's yaw can later point at it, and refresh the stage."""
+        if section_id is None or px is None or py is None:
+            return
+        sec = self.session.place_section(section_id, px, py)
+        if sec:
+            log.info("placed %s at (%.2f, %.2f) -> azimuth %.1f", section_id, sec.px, sec.py, sec.azimuth_deg)
+            self._save_session()
+            await self._sections_changed()
 
     async def _arrange(self, tracks: list[dict], section_ids: list[str]) -> None:
         mapping = await arranger.arrange(tracks, section_ids)
@@ -625,18 +705,6 @@ class App:
         await self.hub.broadcast({"t": P.FX_TENSION, "value": round(tension, 3)},
                                  roles=("section", "stage"))
 
-    async def _place_section(self, section_id: str, azimuth_deg) -> None:
-        section = self.session.sections.get(section_id)
-        if not section:
-            return
-        try:
-            section.azimuth_deg = float(azimuth_deg)
-        except (TypeError, ValueError):
-            return
-        self._save_session()
-        self.engine.on_sections_changed(self.session.engine_sections())
-        await self._broadcast_roster()
-
     async def _announce_line(self, text: str, audio_b64: str | None = None) -> None:
         payload = {"t": P.ANNOUNCE, "text": text}
         if audio_b64:
@@ -692,19 +760,45 @@ class App:
         if conn:
             await send_json(conn.ws, {"t": P.SECTION_CONFIG, "section_id": section_id,
                                       "instrument": instrument})
-        self.engine.on_sections_changed(self.session.engine_sections())
-        await self._broadcast_roster()
+        await self._sections_changed()
+
+    async def _remove_section(self, section_id: str | None, why: str) -> None:
+        """Delete a section from the roster (explicit leave, or grace expired).
+        Deliberately NO instrument rebalance here: swapping a surviving phone's
+        timbre mid-performance is audible. The engine's index fallback keeps the
+        orphaned part sounding, and the next joiner is dealt the least-covered
+        part — coverage self-heals without disturbing anyone."""
+        if not section_id or section_id not in self.session.sections:
+            return
+        sec = self.session.sections.pop(section_id)
+        log.info("section %s removed (%s, was %s)", section_id, why, sec.instrument)
+        await self._sections_changed()
+
+    async def _reap_later(self, section_id: str) -> None:
+        """After the grace period, drop the section if its phone never came back."""
+        await asyncio.sleep(SECTION_GRACE_S)
+        sec = self.session.sections.get(section_id)
+        if sec and not sec.connected:
+            await self._remove_section(section_id, f"grace {SECTION_GRACE_S:.0f}s expired")
+
+    @staticmethod
+    async def _close_quietly(ws: ServerConnection) -> None:
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     async def _on_disconnect(self, conn: ClientConn) -> None:
-        # A reconnect may already have superseded this socket (the hub keys on
-        # client_id); cleaning up now would evict the LIVE connection and mute
-        # its section for good.
+        # Identity guard: if this client_id already reconnected on a NEWER socket,
+        # this is just the zombie dying — touching the roster/section state here
+        # would silence the live connection (the "one phone stops playing" bug).
         if self.hub.get(conn.client_id) is not conn:
+            log.info("stale socket for %s closed; newer connection lives on", conn.client_id[:8])
             return
-        self.hub.unregister(conn.client_id)
+        self.hub.unregister(conn.client_id, conn)
         if conn.role == "section" and conn.section_id in self.session.sections:
-            # Keep the slot (instrument/placement) for the grace period; a rejoin
-            # with the same client_id rebinds it. For P1 we just mark it dropped.
+            # Keep the slot (instrument/placement) for a grace period so a
+            # screen-off phone rebinds as itself; reap it if it never returns.
             section = self.session.sections[conn.section_id]
             was_ready = section.ready
             section.connected = False
@@ -715,10 +809,17 @@ class App:
                 self.showlog.record("section.drop", section=conn.section_id)
                 self.announcer.poke("section.drop",
                                     f"Section {conn.section_id} dropped off — the orchestra covers.")
+            asyncio.create_task(self._reap_later(conn.section_id))
         elif conn.role in P.WAND_ROLES and self._wand_client == conn.client_id:
             self.session.wand = WandSlot()
             self._wand_client = None
             self.wand.reset()                   # never leave a grab open across a drop
+        await self._broadcast_roster()
+
+    async def _sections_changed(self) -> None:
+        """The one way roster mutations become visible: push the new section
+        list into the engine's routing, then broadcast the roster."""
+        self.engine.on_sections_changed(self.session.engine_sections())
         await self._broadcast_roster()
 
     async def _broadcast_roster(self) -> None:

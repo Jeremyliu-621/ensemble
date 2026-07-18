@@ -52,10 +52,15 @@ class Hub:
         except Exception:  # noqa: BLE001
             pass
 
-    def unregister(self, client_id: str) -> None:
-        conn = self._by_id.pop(client_id, None)
-        if conn:
-            log.info("unregister %s role=%s (total=%d)", client_id[:8], conn.role, len(self._by_id))
+    def unregister(self, client_id: str, conn: ClientConn | None = None) -> None:
+        """Remove a registration. Pass `conn` to make it identity-safe: if a
+        reconnect already replaced this client's entry with a NEWER connection,
+        the old socket's late disconnect must NOT evict the new one."""
+        current = self._by_id.get(client_id)
+        if current is None or (conn is not None and current is not conn):
+            return
+        self._by_id.pop(client_id, None)
+        log.info("unregister %s role=%s (total=%d)", client_id[:8], current.role, len(self._by_id))
 
     def get(self, client_id: str) -> ClientConn | None:
         return self._by_id.get(client_id)

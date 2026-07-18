@@ -17,6 +17,11 @@ HTTPS_PORT = int(os.environ.get("WM_HTTPS_PORT", "8443"))  # https/wss — wand-
 WS_PATH = "/ws"           # everything else on the port is served as a static file
 DEFAULT_SESSION = "lol1"
 
+# How long a dropped phone keeps its slot (instrument/placement) before the
+# section is deleted from the roster. Long enough to survive a screen-off nap +
+# ws ping timeout; short enough that closed tabs actually disappear.
+SECTION_GRACE_S = float(os.environ.get("WM_SECTION_GRACE_S", "90"))
+
 # --- Protocol ---
 PROTOCOL_VERSION = 1
 
@@ -26,6 +31,11 @@ LOOKAHEAD_MS = 600.0      # pull events up to now + this
 MIN_LEAD_MS = 150.0       # every emitted event must satisfy at >= now + this (else dropped + logged)
 
 # --- Gesture semantics ---
+# Instant per-gesture flourish/sting (the "room answers immediately" effect).
+# Off by default — it reads as an annoying sound effect during song conducting;
+# WM_PICKUP=1 re-enables it (e.g. for the hardware wand's sting pad).
+PICKUP = os.environ.get("WM_PICKUP", "0") != "0"
+
 # A gesture bends the song for this many bars, then it returns to normal —
 # a conductor's cue, not a permanent remix.
 GESTURE_BARS = int(os.environ.get("WM_GESTURE_BARS", "5"))

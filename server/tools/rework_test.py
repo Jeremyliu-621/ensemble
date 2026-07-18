@@ -80,6 +80,8 @@ def units() -> None:
     print("    6 -> 2 -> 0 -> 4")
 
     print("[3b] on-wand TinyML labels drive the same pipeline as raw windows")
+    import config as _cfg
+    _cfg.PICKUP = True                            # the sting path still works when enabled
     c = loaded_conductor()
     c.on_classified("sharp_up", 1.0, 400.0)
     assert c._gesture is not None and c._gesture.vertical == 0.9

@@ -1,0 +1,272 @@
+{
+ "summary": "Merged the 28 raw entries into 18 distinct devices (duplicates collapsed, all 7 checker corrections applied: escape-tone precondition, pad parallel-perfect guard, arpeggio span, 9-8 bass exception, 3rd/6th narrowing, FuxCP Table 2 costs, mode-aware cadence). The catalog confirms the design principle: 12 of 18 devices are rated safe, and every safe device is safe precisely because its recipe is closed over the diatonic scale and chord_pcs. Exactly 5 are ship-now: the two already-validated devices (voice-led pad, approach run) plus three new ones chosen for smallest-function/highest-audibility ratio \u2014 passing-tone infill (EMBELLISH), arpeggiated figuration (ENERGIZE), and call-and-response echo (ANSWER) \u2014 which together give the conductor 5 of the 7 gesture actions immediately. Every failureConstraint is written as a few-line checkable predicate suitable as a GRPO gate, and FuxCP's published cost tables (motion costs 0/1/2, melodic-interval costs, dissonance rules) are a ready-made shaped reward for the counterpoint devices when they come off the backlog.",
+ "devices": [
+  {
+   "name": "Voice-led chord pad",
+   "recipe": "3-5 voices below melody (top pad note <= min(bar melody) - 3 st, voices >= MIDI 48 unless acting as bass). Init: root/5th low, 3rd mid, tensions (7/9/11/13) in the highest pad voices; half-open voicing \u2014 >= 7 st between the two lowest voices, close 3rds/4ths above. On chord change: move each voice to nearest pc of C_new minimizing total semitone displacement (prefer moves <= 2 st, cap 4); re-strike only on chord changes; whole/half durations. Doubling priority root > 5th > 3rd; never double the 7th; 9 sparingly; for 9th-and-higher chords the lowest pad pc is root (or 3/7 when a separate bass covers the root). ADDED GUARD (checker fix, FuxCP Rule 7/1.P1): reject a move if any voice pair sits at interval mod 12 in {0,7} both before AND after while both voices move in the same direction; tie-break toward contrary motion vs the melody.",
+   "whenUsed": "Default harmonic bed under any melody (Absil: the most frequent string-section role). GROUND gesture. Already implemented and validated by ear in this system.",
+   "failureConstraint": "Fails via parallel 5ths/8ves when whole voicings plane, muddy low spacing, leaping or crossing voices, doubled tensions, extended chords in inversion. Checks: no parallel-perfect pair (the added Rule 7 guard); per-voice move <= 4 st; lowest interval >= 7 st and no interval < 3 st below MIDI 52; no voice crossing; doubled pcs subset of {root, 5th, 3rd}; tensions voiced above the 3rd and 5th; top pad note < min melody note.",
+   "safety": "safe",
+   "feasibility": "ship-now",
+   "sources": [
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf",
+    "https://jim2023.sciencesconf.org/data/pages/3_2_SPROCKEELS_ET_AL.pdf"
+   ]
+  },
+  {
+   "name": "Diatonic approach run",
+   "recipe": "Given a chord change at beat T with pcs C_new and last melody pitch m: target = chord tone of C_new nearest m (or root of C_new in melody register). steps = scale midis strictly between m and target ordered toward target; fill window [T-L, T) with L = 1-2 beats (3-8 sixteenths), equal subdivision, exactly +/-1 scale degree per note (monotonic), vel ramp +2/note, target onset == T exactly. For same-direction runs >= 5 notes enforce FuxCP third-species Rule 9: the 3rd note of any 5-note stepwise group must be consonant with the sounding chord.",
+   "whenUsed": "Sweeping into a chord change or section boundary; upbeat fill at phrase ends. TRANSITION gesture. Already implemented and validated by ear (the glissando-into-chord-change discovery).",
+   "failureConstraint": "Fails if it misses the downbeat, lands on a non-chord tone, or contains off-scale notes; long runs without consonant checkpoints smear. Checks: last note onset == T AND its pc in C_new; every pc in key scale; equal inter-onset intervals; monotonic pitch direction; Rule 9 checkpoint on 5-note groups. Chained passing tones, so step-approach/step-departure holds by construction.",
+   "safety": "safe",
+   "feasibility": "ship-now",
+   "sources": [
+    "https://openmusictheory.github.io/embellishingTones.html",
+    "https://jim2023.sciencesconf.org/data/pages/3_2_SPROCKEELS_ET_AL.pdf",
+    "https://webperso.info.ucl.ac.be/~pvr/Lamotte_43031800_2024.pdf"
+   ]
+  },
+  {
+   "name": "Diatonic passing-tone infill",
+   "recipe": "scale = {(key+d)%12 for d in [0,2,4,5,7,9,11]} (adjust degree set per mode). For each consecutive melody pair (a,b) with b.onset == a.onset + a.dur: if |b.midi - a.midi| in {3,4} (a third) and both in scale, find the single scale midi m strictly between; shorten a by s = min(a.dur/2, 0.5 beat) and emit PT at (a.onset + a.dur - s, s, m, a.vel - 10). If the gap is 5 st (a fourth), insert the two intermediate scale tones splitting s evenly. Equally applicable to generated inner lines.",
+   "whenUsed": "Default 'add motion without changing the tune' move over static or gently moving bars; fills melodic thirds and fourths. EMBELLISH gesture at low intensity.",
+   "failureConstraint": "Fails if chromatic, if it lands on a strong beat as unresolved dissonance, or dangles as the last event. Checks: pt pc in scale; approached AND left by step in one direction (a<m<b or a>m>b); onset on weak subdivision OR pc in chord_pcs; a note follows immediately at pt end. This is exactly Fux's diminution rule (FuxCP Rule 10 / 2.H2 / 3.H2): dissonant middle note legal only when filling a third by diatonic step between consonances.",
+   "safety": "safe",
+   "feasibility": "ship-now",
+   "sources": [
+    "https://openmusictheory.github.io/embellishingTones.html",
+    "https://jim2023.sciencesconf.org/data/pages/3_2_SPROCKEELS_ET_AL.pdf",
+    "https://webperso.info.ucl.ac.be/~pvr/Lamotte_43031800_2024.pdf"
+   ]
+  },
+  {
+   "name": "Arpeggiated figuration (Alberti / sweep)",
+   "recipe": "Build triad voicing [v0<v1<v2] from chord_pcs (root low) near C3-C4, wholly below the melody. Alberti: loop [v0, v2, v1, v2] in even 8ths (or 16ths), cycle restarting with the root exactly at each chord-change onset. Sweep: sort chord tones ascending from root near C3, even 8ths/16ths rising 1-2 octaves, optionally folding back; root on the strong beat of each chord span. Register rules (corrected per checker \u2014 no 16-st total-span cap): adjacent figuration notes <= 9 st apart, lowest note >= MIDI 40 (~E2), entire figure <= min concurrent melody - 3 st. On chord change re-derive the voicing by nearest-tone within 1 beat and continue the pattern.",
+   "whenUsed": "Energizing static harmony without new pitch content: light classical mobile texture (Alberti, K.545 archetype) or flowing ballad sweep. ENERGIZE gesture replacing static pads.",
+   "failureConstraint": "Fails on non-chord tones, grid drift, arpeggiating the old chord after a change, or crossing the melody. Checks: every pc in chord_pcs; onsets on the exact subdivision grid; pattern restarts within 1 beat of each change with root on the change onset; register rules above. Note budget: a single 16th-note line is exactly 16 notes/bar \u2014 the cap; prefer 8ths when other devices are active.",
+   "safety": "safe",
+   "feasibility": "ship-now",
+   "sources": [
+    "https://musictheory.pugetsound.edu/mt21c/ArpeggiatedAccompaniments.html"
+   ]
+  },
+  {
+   "name": "Call-and-response echo",
+   "recipe": "Find gaps: spans >= 1 beat in the bar with no melody note. Take the last 2-5 melody notes before the gap; shift onsets so the copy starts inside the gap; transpose +/-12 or a diatonic 6th below (scale index - 5); vel x0.7; optionally halve durations. Drop or move any echo note sounding against a concurrent melody note at mod-12 interval in {1,2,5,6,10,11}; snap strong-beat echo pcs to scale (chord_pcs if on the downbeat) if the chord changed since the fragment was heard.",
+   "whenUsed": "Answering phrase ends and filling where the melody breathes \u2014 the classic big-band backing move. ANSWER gesture; theatrical payoff in a live conducted show.",
+   "failureConstraint": "Fails when it talks over the soloist: overlapping at dissonant intervals, louder than the melody, or restating stale old-chord tones. Checks: echo onsets inside gaps OR consonant vs simultaneous melody (mod-12 in {0,3,4,7,8,9}); echo vel < melody vel; strong-beat pcs in scale, downbeat pcs in chord_pcs.",
+   "safety": "safe",
+   "feasibility": "ship-now",
+   "sources": []
+  },
+  {
+   "name": "Pedal point",
+   "recipe": "pedal_pc = key (tonic) or (key+7)%12 (dominant, for buildups). Voice it in MIDI 36-48 as the lowest sounding note; whole notes or a one-bar rhythmic ostinato held constant across all chord changes for 2-8 bars; enter and exit only on bars whose chord_pcs contain pedal_pc; keep all other generated voices >= 7 st above it.",
+   "whenUsed": "Intros, buildups, stasis-with-tension: dominant pedal drives toward a cadence, tonic pedal gives calm/finality (Absil shows both). GROUND gesture at higher (dominant) or maximal (tonic) stability.",
+   "failureConstraint": "Nearly unbreakable in the bass register. Fails if the pc is neither tonic nor dominant, if it sits mid-register where seconds grate, or if it enters/exits on an excluding chord. Checks: pedal_pc in {key, (key+7)%12}; pedal midi < every other sounding midi and <= 48; entry and exit bars have pedal_pc in chord_pcs; total duration <= 8 bars.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": [
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf"
+   ]
+  },
+  {
+   "name": "Neighbor tone / mordent",
+   "recipe": "For a melody or line note t with dur >= 0.5-1 beat (pc preferably in chord_pcs): complete neighbor = [t (dur/2), n (dur/4), t (dur/4)] where n = adjacent scale tone (1-2 st) above or below; prefer upper neighbor after a descent, lower after an ascent; n vel = t.vel - 10, on a weak subdivision. Double neighbor = [t, upper_n, lower_n, t] at dur/4 each. Mordent = the fast lower-neighbor-returning figure (sanctioned in FuxCP's fifth-species rhythm parser).",
+   "whenUsed": "Decorating long held notes without changing the contour; ornamentation of a static moment, works even with static harmony. EMBELLISH gesture, lighter than a passing tone.",
+   "failureConstraint": "Fails if the neighbor is chromatic, does not return to the same pitch, or is longer/louder than the parent. Checks: n in scale and adjacent scale degree (|n.midi - t.midi| in {1,2}); identical pitch before and after n; n.dur <= t.dur/2; n on a weaker beat than the parent onset; n vel < t vel.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": [
+    "https://openmusictheory.github.io/embellishingTones.html",
+    "https://webperso.info.ucl.ac.be/~pvr/Lamotte_43031800_2024.pdf"
+   ]
+  },
+  {
+   "name": "Anticipation",
+   "recipe": "At an upcoming chord change at beat T: p = the pitch planned for the downbeat (nearest pitch to current melody with pc in C_new \u2014 ideally the literal downbeat note). Emit p at T - 0.25 or T - 0.5 with dur ending at T, vel ~0.8x the downbeat vel; the downbeat restates p (or tie: single early note, not restruck \u2014 OMT's syncopation variant). Deploy preferentially at phrase ends.",
+   "whenUsed": "Forward pull into a downbeat; pop/gospel drive at chord changes and cadences ('a stable tone that comes too early'). TRANSITION gesture, gentle intensity.",
+   "failureConstraint": "Reads as a wrong note if the anticipated pitch differs from the downbeat pitch, is long (wrong-chord clash), or is loud against the still-sounding old chord. Checks: anticipation.midi == following downbeat midi; pc in C_new; dur <= 0.5 beat; onset on a weak subdivision; vel <= downbeat vel.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": [
+    "https://openmusictheory.github.io/embellishingTones.html"
+   ]
+  },
+  {
+   "name": "Diatonic sequence",
+   "recipe": "figure = previous bar's notes; shift = -1 or -2 scale degrees (descending safest). Snap any chromatic input pitch to the nearest scale tone; deg = scale index of midi; out = scale degree deg + shift mapped back octave-aware; copy onsets/durs/vels. Then snap any strong-beat note whose pc is not in current chord_pcs to the nearest chord tone (move <= 2 st). Maintain a run counter and break the pattern after 2-3 sequenced bars.",
+   "whenUsed": "Developing a motif the audience just heard \u2014 the classical variation engine; needs only prev_bar + key + chord. DEVELOP gesture (circling repeat-but-lower).",
+   "failureConstraint": "Fails as a real (chromatic) transposition off-key, as strong-beat clashes with the new chord, or as more than ~3 literal repetitions (the derided rosalia). Checks: all output pcs in key scale; strong-beat pcs in chord_pcs after snapping; consecutive-sequence counter <= 3.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": []
+  },
+  {
+   "name": "Octave doubling / unisono",
+   "recipe": "Copy the melody line at -12 (weight) or +12 (brilliance) with identical onsets/durations, vel = original - 12 (~0.8x); both octaves for climax unisono across instruments (Absil: 'for maximum melodic impact use unisono'). Never add a +12 copy of the bass/pedal line; no doubled note below ~E2 (MIDI 40).",
+   "whenUsed": "Climaxes and tutti moments where the melody must dominate; instant intensity with zero new material. INTENSIFY gesture.",
+   "failureConstraint": "Nearly unbreakable \u2014 orchestration, not voice-leading. Fails only via rhythm mismatch or register collision. Checks: doubled track is an exact rhythmic copy (same onset/dur sets); doubled notes >= 3 st from any sustained pad voice (else drop the pad tone); floor at MIDI 40; no upward bass doubling in small ensembles.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": [
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf"
+   ]
+  },
+  {
+   "name": "Tremolo",
+   "recipe": "For pad notes with dur >= 1 beat: replace with same-pitch reiterations at 16th subdivision, vel starting ~40 with optional linear crescendo toward the next downbeat; fingered variant alternates the pitch with a chord tone a 3rd below; last reiteration ends exactly at the next chord change or downbeat. Note budget: restrict to 1-2 voices (a 4-voice 16th tremolo is 64 notes, blowing the 16-note bar budget).",
+   "whenUsed": "Suspense and tension buildup before a drop or climax (Absil: 'a familiar effect for creating suspense and tension'). TENSE/RUMBLE variant of the ENERGIZE gesture.",
+   "failureConstraint": "Fails if it swamps the melody or smears across a chord change. Checks: tremolo pitches are chord tones; tremolo vel < concurrent melody vel; reiterations quantized to one subdivision; ends exactly at the change; never tremolo the melody line; <= 2 voices per bar.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": [
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf"
+   ]
+  },
+  {
+   "name": "Bell chords",
+   "recipe": "During a detected melodic gap, break, or intro bar: order 3-5 chord tones bottom-up (or top-down); enter one per constant time interval (e.g. every 8th), each note held cumulatively until the end of the bar/phrase so the chord assembles like overlapping bells; entry onsets avoid coinciding with melody attacks (Absil: minimum coincident attacks between layers).",
+   "whenUsed": "Breaks at phrase ends and introductions (Absil's stated contexts); a shimmering way to state a chord during melodic silence. ANNOUNCE/BLOOM variant of ENERGIZE, or fill-the-gap intent.",
+   "failureConstraint": "Fails with irregular entry spacing, non-chord entries, early releases, or masking the melody. Checks: constant inter-onset interval between entries; every entry pc in chord_pcs; each note sustains to phrase end (cumulative stack); entries avoid melody onsets; final stack contains the full chord.",
+   "safety": "safe",
+   "feasibility": "backlog",
+   "sources": [
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf"
+   ]
+  },
+  {
+   "name": "Suspension (4-3 / 7-6 / 9-8)",
+   "recipe": "At a bar/chord boundary old->new: find pitch s sounding at the end of the old bar with s.pc in old_chord_pcs (preparation: tied from the arsis, same pitch \u2014 FuxCP 4.M1) such that r = s minus one diatonic step (1-2 st, both in scale) has r.pc in new_chord_pcs, and s is dissonant over the new bass (interval vs bass mod 12 in {1,2,5,10,11} \u2014 exactly the 9-8/4-3/7-6 family). Hold s tied across the downbeat ~1 beat (strong), resolve down to r on a weaker beat (4.P1: next lower consonance; arsis consonant per 4.H1). Chainable at successive changes over descending sequences. Retardation variant (ported from Absil): resolve UP by semitone, leading tone to tonic, final chord of a section only \u2014 treat as spicy.",
+   "whenUsed": "Expressive tension-and-release lean at chord changes and cadences; Absil prescribes it to give chorale backgrounds harmonic interest. LEAN/TENSION variant of the TRANSITION gesture, releasing on beat 2.",
+   "failureConstraint": "Ruined by: unprepared dissonance; upward or leaping resolution; the resolution pc sounding in an UPPER voice within +/-14 st of s (corrected per checker: the BASS may sound it \u2014 that is precisely the legal 9-8 figure); a bare harmonic 7th when the moving part is the lower voice (4.H2). Checks: s.pc in old_chord_pcs and tied; s.midi - r.midi in {1,2}; r.pc in new_chord_pcs; no non-bass concurrent note with pc == r.pc within +/-14 st during the dissonance; dissonance on strong beat, resolution weaker.",
+   "safety": "moderate",
+   "feasibility": "backlog",
+   "sources": [
+    "https://jim2023.sciencesconf.org/data/pages/3_2_SPROCKEELS_ET_AL.pdf",
+    "https://webperso.info.ucl.ac.be/~pvr/Lamotte_43031800_2024.pdf",
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf",
+    "https://openmusictheory.github.io/embellishingTones.html"
+   ]
+  },
+  {
+   "name": "Cadential formula",
+   "recipe": "On a cadence directive spanning two bars \u2014 the device OWNS both bars' harmony (V then I), or is gated on the current chord containing the dominant pc. Penultimate bar (dominant function): bass = (key+7)%12 voiced low; exactly ONE upper voice takes the leading tone (key+11)%12 \u2014 raised 7th in minor, used only within the dominant bar \u2014 nearest below the melody, resolving UP 1 st to key at the final downbeat; optional 4-3 suspension over V (hold pc key, resolve down a semitone to key+11). Final bar (corrected per checker, mode-aware): all voices land on {key, key + (3 if minor else 4), key+7} mod 12, bass pc = key; picardy third an optional style flag (Fux: no minor third in the final chord). Two-voice Fux forms: penultimate M6 (cf below) resolves to the octave; m3 (cf above) resolves to unison/octave-class 0 (Rules 5 + 2).",
+   "whenUsed": "Phrase and section endings; the conductor's 'wrap it up' signal. Closing-fist variant of the TRANSITION gesture.",
+   "failureConstraint": "Fails via a doubled leading tone (forces parallel octaves), a leading tone not stepping up to tonic, non-triad tones in the final chord, or an unresolved suspension. Checks: count of pcs == (key+11)%12 in the penultimate sonority <= 1 AND that voice's next pc == key; final-bar pcs subset of the mode-aware tonic triad; final bass pc == key; no dissonant interval at the final downbeat. Reward must NOT hardcode the major triad or it punishes every correct minor-key cadence.",
+   "safety": "moderate",
+   "feasibility": "backlog",
+   "sources": [
+    "https://jim2023.sciencesconf.org/data/pages/3_2_SPROCKEELS_ET_AL.pdf",
+    "https://webperso.info.ucl.ac.be/~pvr/Lamotte_43031800_2024.pdf"
+   ]
+  },
+  {
+   "name": "Diatonic 3rd/6th parallel doubling",
+   "recipe": "Map each melody midi to its scale index; subtract 2 (third below) or 5 (sixth below); map back octave-aware; vel x0.8; snap any strong-beat double whose pc leaves the chord to the nearest chord tone (move <= 2 st). Keep >= 2 st from independent voices at every instant. Never double the leading tone at a cadence (its forced resolution creates parallel octaves). Exact-octave copying is a separate device (Octave doubling).",
+   "whenUsed": "Sweetening a line \u2014 the harmonized-in-thirds/sixths sound; warm parallel shadow under a hummable melody. INTENSIFY gesture, softer flavor than octaves.",
+   "failureConstraint": "Fails via strong-beat off-scale/off-chord doubles, contour distortion from aggressive snapping, or cadential leading-tone doubling. Checks: all doubled pcs in key scale; strong-beat doubled pcs in chord_pcs; doubled line contains no (key+11)%12 pc in cadence context; >= 2 st clearance from other voices. Rated moderate, not safe (checker): the chord-snap can distort the contour.",
+   "safety": "moderate",
+   "feasibility": "backlog",
+   "sources": []
+  },
+  {
+   "name": "Contrary-motion counter-melody (slow strata)",
+   "recipe": "Grid = half notes (~2x the melody's median duration \u2014 Absil: strata use different note values). Per strong beat: d = sign of melody pitch change since the previous strong beat; choose a chord tone 3-16 st below the melody whose motion from the previous counter-note has sign -d (contrary) or 0 (oblique), preferring steps; connect strong beats with at most one weak-beat diatonic passing tone; gap-fill (move while the melody rests, hold while it is dense); any leap followed by a step in the opposite direction (Absil's rule).",
+   "whenUsed": "Second statements of a theme and answering phrases \u2014 melodic independence under a familiar melody (Absil: counterpoint's main characteristic). ANSWER gesture, sustained variant.",
+   "failureConstraint": "Fails by shadowing the melody in parallels, crossing it, or clashing on strong beats. Checks: chord tones on every strong beat (non-chord tones only as weak-beat diatonic passing tones); >= 70% of moves contrary/oblique; no consecutive strong-beat parallel P5/P8 vs melody; always below the melody; median note value >= 2x melody's; leap-then-opposite-step.",
+   "safety": "moderate",
+   "feasibility": "backlog",
+   "sources": [
+    "https://www.fransabsil.nl/archpdf/arrbook.pdf",
+    "https://openmusictheory.github.io/embellishingTones.html"
+   ]
+  },
+  {
+   "name": "First-species counter-melody",
+   "recipe": "One note per melody note (or per beat), below the melody, diatonic, within a 10th. Candidate filter: interval vs melody mod 12 in {0,3,4,7,8,9} (Cons_p = {0,7}, Cons_imp = {3,4,8,9}); strong beats additionally pc in chord_pcs; unison only on first/last note (Rule 4). Beam/greedy minimize summed cost: +1 for perfect consonance (Pref 1: prefer imperfect); motion vs melody 0/1/2 for contrary/oblique/direct (Pref 3); FORBID direct motion into a perfect consonance (Rule 7) and parallel P5/P8; melodic-interval costs per FuxCP Table 2 AS CORRECTED by checker \u2014 seconds 0, thirds 1, P4 2, P5 2, minor 6th 2, unison/octave 1; forbidden melodic intervals mod = {6,9,10,11} (tritone, M6, m7, M7); leaps above a minor 6th only as exact octaves (Rule 6); no immediate repetition (2.M2); no two consecutive same-direction semitone moves (G7). NOT a duplicate of the slow-strata counter-melody: this is 1:1 note-against-note.",
+   "whenUsed": "A singing second line when the melody holds long notes or repeats; second phrase of a section. ANSWER/DIALOGUE gesture, note-for-note variant.",
+   "failureConstraint": "Fails through parallel perfects, direct-into-perfect, tritone/M6/7th leaps, voice crossing, or strong-beat dissonance. Every check is a cheap per-note interval test, and the FuxCP cost tables ARE the GRPO reward: hard rules as gates, summed preference costs (the solver minimizes exactly this) as the shaped reward. Backlog because it needs search over candidates, not a single pure pass.",
+   "safety": "moderate",
+   "feasibility": "backlog",
+   "sources": [
+    "https://jim2023.sciencesconf.org/data/pages/3_2_SPROCKEELS_ET_AL.pdf",
+    "https://webperso.info.ucl.ac.be/~pvr/Lamotte_43031800_2024.pdf"
+   ]
+  },
+  {
+   "name": "Appoggiatura / escape tone",
+   "recipe": "Appoggiatura: on a strong beat, replace chord tone t with [a, t]: a = scale step above t (below possible), dur 1/2 to 2/3 of t, accented (vel +8); needs NO preparation and may be approached by leap; t sounds for the remainder, softer, reached DOWN by step. Escape tone (precondition CORRECTED per checker): given n1 -> n2 with n2 below n1 by 1-4 st (descending step or small skip), insert the scale step above n1 in the last 0.25-0.5 of n1's duration, unaccented and quiet \u2014 the resulting esc -> n2 interval is then automatically a leap >= 3 st opposite the step (canonical sol-la-fa).",
+   "whenUsed": "Appoggiatura: expressive sigh on downbeat melodic peaks and phrase endings \u2014 ACCENT/EXPRESS intensity of the EMBELLISH gesture. Escape tone: a light lift at a phrase-member end before a descent.",
+   "failureConstraint": "The easiest ornaments to ruin. Appoggiatura checks: a in scale; |a - t| in {1,2}; t.pc in chord_pcs; resolution within 1 beat, down by step; NO concurrent note with pc == t.pc within +/-14 st while a sounds (bare-second clash); a on the strong beat, t after. Escape checks: off-beat onset; dur <= 0.5; step-before/opposite-leap-after pattern. Escape tone may also fail the audibility filter for lay listeners \u2014 verify by listening test.",
+   "safety": "spicy",
+   "feasibility": "backlog",
+   "sources": [
+    "https://openmusictheory.github.io/embellishingTones.html"
+   ]
+  }
+ ],
+ "actions": [
+  {
+   "name": "GROUND",
+   "gestureHint": "Flat palm pressed downward and held steady; lower = more bass weight",
+   "devices": [
+    "Voice-led chord pad",
+    "Pedal point"
+   ]
+  },
+  {
+   "name": "EMBELLISH",
+   "gestureHint": "Small circular stir of the fingers; stir speed = ornament density, sharp accent flick = appoggiatura",
+   "devices": [
+    "Diatonic passing-tone infill",
+    "Neighbor tone / mordent",
+    "Appoggiatura / escape tone"
+   ]
+  },
+  {
+   "name": "TRANSITION",
+   "gestureHint": "Rising sweep that lands exactly on the next downbeat; held-back pull = suspension, closing fist = cadence",
+   "devices": [
+    "Diatonic approach run",
+    "Anticipation",
+    "Suspension (4-3 / 7-6 / 9-8)",
+    "Cadential formula"
+   ]
+  },
+  {
+   "name": "ENERGIZE",
+   "gestureHint": "Rippling/fluttering fingers; flutter speed sets the subdivision, trembling hand = tremolo, upward scatter = bell chords",
+   "devices": [
+    "Arpeggiated figuration (Alberti / sweep)",
+    "Bell chords",
+    "Tremolo"
+   ]
+  },
+  {
+   "name": "INTENSIFY",
+   "gestureHint": "Both hands widening apart or rising fists; wider = octaves, softer spread = thirds/sixths",
+   "devices": [
+    "Octave doubling / unisono",
+    "Diatonic 3rd/6th parallel doubling"
+   ]
+  },
+  {
+   "name": "ANSWER",
+   "gestureHint": "Point across the stage to a second section, as if cueing a reply",
+   "devices": [
+    "Call-and-response echo",
+    "Contrary-motion counter-melody (slow strata)",
+    "First-species counter-melody"
+   ]
+  },
+  {
+   "name": "DEVELOP",
+   "gestureHint": "Circular 'again' motion trailing downward \u2014 repeat it, but lower",
+   "devices": [
+    "Diatonic sequence"
+   ]
+  }
+ ],
+ "caveats": "Source strength is uneven: OMT (embellishing tones), Absil's arranging workbook, and the FuxCP paper + Lamotte thesis were verified by the adversarial pass, but Anticipation, Diatonic sequence, Call-and-response echo, and 3rd/6th doubling carry no verified citation \u2014 they encode uncontroversial common practice, yet their specific numbers (0.5-beat anticipation cap, 70% contrary-motion ratio, 8-bar pedal cap, vel offsets of -10/-12/x0.7) are engineering choices that need listening tests, not literature values. One ship-now device (echo) is therefore in the weakest-sourced group \u2014 it earned its slot on audible payoff and function size, not citation strength. Checker-resolved disagreements to honor in the reward code: FuxCP Table 2 melodic costs (octave 1, m6 legal at 2; forbidden set {6,9,10,11}), the 9-8 bass exception to the no-doubled-resolution rule, the escape-tone precondition (decorates a step, creates the leap), no hard 16-st arpeggio span cap, and mode-aware cadence triads (hardcoded major would punish correct minor-key cadences). Nothing was rejected outright because the adversarial pass had already pruned; the closest calls were tremolo (a 4-voice 16th tremolo is 64 notes, far over the 16-notes-per-bar budget \u2014 restricted to <= 2 voices) and the escape tone (may be inaudible to lay listeners). The 16-note bar budget is a global constraint the device layer cannot see: 16th-note figuration alone consumes it, so the orchestrator must arbitrate concurrent devices. Finally, research question 3 was only answered via FuxCP; Band-in-a-Box-style generators, Impro-Visor, and EMI encodings were not verified in this pass and may offer additional borrowable formulations (especially for the echo and sequence devices)."
+}

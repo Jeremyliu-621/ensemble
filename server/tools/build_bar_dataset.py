@@ -25,7 +25,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))  # server/ on path
 
 from engine import candidates as C
-from engine.harmony import PAD_VEL, ROOT_VEL, voice_lead
+from engine.harmony import PAD_VEL, ROOT_VEL, arpeggiate, echo, passing_infill, voice_lead
 from engine.song import BarData
 from engine.theory import scale_notes, triad
 from ml.barmodel import sanitize_line
@@ -46,10 +46,12 @@ def harmonize(bar: BarData, prev: BarData, key: int) -> list:
 # tools/mock_model.py to impersonate the trained model)
 STYLE_GEN = {
     "harmonize": harmonize,
+    "passing": passing_infill,     # EMBELLISH (theory catalog, ship-now)
+    "arpeggio": arpeggiate,        # ENERGIZE (theory catalog, ship-now)
+    "echo": echo,                  # ANSWER — replaces the old delayed-echo semantics
     "dense": C.rhythmic_dense,
     "calm": C.sustained,
     "counter": C.contrary_motion,
-    "echo": C.delayed,
     "free": C.lower_imitation,
 }
 
@@ -61,6 +63,8 @@ RHYTHMS = [
     [(0, 4), (6, 2), (8, 4), (14, 2)],                                        # syncopated
     [(0, 8), (8, 4), (12, 4)],                                                # half + quarters
     [(0, 6), (6, 6), (12, 4)],                                                # dotted
+    [(0, 4), (8, 4), (12, 2)],                                                # gapped (rest on beat 2)
+    [(0, 2), (2, 2), (4, 2), (10, 2), (12, 2)],                               # phrase + rest + pickup
 ]
 
 
@@ -144,12 +148,41 @@ def midi_rows(midi_dir: str) -> list[dict]:
     return rows
 
 
+def _load_reward():
+    """Import the GRPO reward from the env package (stubbing the freesolo SDK)
+    so every dataset row can be validated against the judge it will be scored
+    by — generator/reward disagreement is caught at BUILD time, not training."""
+    import sys as _sys
+    import types as _types
+    fs = _types.ModuleType("freesolo")
+    ds = _types.ModuleType("freesolo.datasets")
+    ev = _types.ModuleType("freesolo.environments")
+    ds.TaskExample = object
+    ev.EnvironmentSingleTurn = type("E", (), {})
+    ev.RewardResult = lambda **k: k
+    _sys.modules.update({"freesolo": fs, "freesolo.datasets": ds, "freesolo.environments": ev})
+    _sys.path.insert(0, str(REPO / "freesolo" / "barline"))
+    from environment import reward
+    return reward
+
+
 def to_freesolo(rows: list[dict]) -> list[dict]:
-    out = []
+    reward = _load_reward()
+    out, rejected = [], {}
     for r in rows:
         label = {"notes": r["notes"]}
-        assert sanitize_line(label, r["context"]["key"]) is not None, f"unplayable label: {label}"
-        out.append({"input": bar_prompt_for(r["context"]), "output": json.dumps(label)})
+        style = r["context"].get("style", "harmonize")
+        assert sanitize_line(label, r["context"]["key"], style) is not None, f"unplayable label: {label}"
+        prompt = bar_prompt_for(r["context"])
+        output = json.dumps(label)
+        score = reward(prompt, output)
+        if score < 0.95:                       # self-consistency gate: judge must love its own teacher
+            style = r["context"].get("style", "?")
+            rejected[style] = rejected.get(style, 0) + 1
+            continue
+        out.append({"input": prompt, "output": output})
+    if rejected:
+        print(f"  self-validation gate rejected: {rejected} (generator/reward mismatch rows)")
     return out
 
 

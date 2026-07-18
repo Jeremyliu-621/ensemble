@@ -27,6 +27,7 @@ class Scheduler:
         self._hub = hub
         self._task: asyncio.Task | None = None
         self._seen_choice: str | None = None
+        self._seen_transport: tuple | None = None
 
     def start(self) -> None:
         if self._task is None:
@@ -85,20 +86,25 @@ class Scheduler:
             await self._hub.broadcast({"t": SCHED_NOTES, "events": safe},
                                       roles=("section", "stage"))
 
-        # 3) When the chosen accompaniment changes, push a light live update to the
-        # stage/editor (drives the "now playing" + change indicator, even laptop-only).
+        # 3) When the accompaniment OR the transport (anchor/tempo/length) changes,
+        # push a light live update to the stage/editor. This drives the "now playing"
+        # indicator and the editor's playhead, which reads `transport` to place itself.
         status = getattr(self._engine, "status", None)
         if status:
             st = status()
-            # Fire on decision changes AND on envelope movement (~0.05 steps),
-            # so the stage can animate the conducting intensity live.
+            # Fire on decision changes, on envelope movement (~0.05 steps, so the
+            # stage can animate conducting intensity live) AND on any transport
+            # change (anchor/tempo/length — drives the editor/console playhead).
+            tr = st.get("transport") or {}
+            tsig = (tr.get("playing"), round(tr.get("anchor", 0.0)), tr.get("n_bars"), round(tr.get("bar_ms", 0.0)))
             key = (st.get("last_choice"), st.get("decision_source"),
                    round(st.get("intensity", 0.5) * 20))
-            if key != self._seen_choice:
+            if key != self._seen_choice or tsig != self._seen_transport:
                 self._seen_choice = key
+                self._seen_transport = tsig
                 await self._hub.broadcast({
                     "t": ENGINE_STATE, "last_choice": st["last_choice"], "gesture": st["gesture"],
                     "decision_source": st.get("decision_source"),
                     "intensity": st.get("intensity"),
-                    "playing": st["playing"], "bpm": st["bpm"], "song": st["song"],
+                    "playing": st["playing"], "bpm": st["bpm"], "song": st["song"], "transport": tr,
                 }, roles=("stage", "admin"))

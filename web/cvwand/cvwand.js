@@ -44,16 +44,24 @@ let grabbed = false;
 let seq = 0;
 let poseBuf = [];
 const trail = [];             // {xm, y, grabbed}
-let lastFrameT = 0, fps = 0;
-let aimSection = 0;
 let palmSince = 0, palmXs = [], lastTransport = 0, playing = true;
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-// --- start camera + tracker (must be inside a user gesture) ---
-el("start").addEventListener("click", async () => {
-  el("start").style.display = "none";
-  el("loading").style.display = "block";
+// --- start camera + tracker: AUTOMATICALLY, on load. No buttons, no dials —
+// the camera IS the wand and it should simply be on. (getUserMedia needs no
+// user gesture; the browser's own permission prompt is the only gate, and it
+// remembers the answer.) Failures show a friendly note and retry.
+async function boot() {
+  // Browsers only expose the camera on secure pages (localhost or https) —
+  // over plain http on a LAN IP, navigator.mediaDevices simply doesn't exist.
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    el("loading").innerHTML =
+      "🔒 the camera only works on a secure page<br>" +
+      `on the laptop open <b>http://localhost:${location.port || 80}</b>` +
+      `<br>(or https://${location.hostname}:8443 after trusting the cert)`;
+    return;
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
@@ -63,24 +71,33 @@ el("start").addEventListener("click", async () => {
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
 
-    el("loading").textContent = "loading hand model…";
+    el("loading").textContent = "waking the hand tracker…";
     const fileset = await FilesetResolver.forVisionTasks(WASM);
     landmarker = await HandLandmarker.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
       runningMode: "VIDEO",
       numHands: 1,
     });
-    el("loading").style.display = "none";
+    el("loading").hidden = true;
+
+    // one short hint, then the hand speaks for itself
+    const hint = el("hint");
+    hint.hidden = false;
+    setTimeout(() => { hint.style.opacity = "0"; setTimeout(() => (hint.hidden = true), 1100); }, 6000);
 
     connect();
     running = true;
     requestAnimationFrame(loop);
   } catch (e) {
     console.error("[cvwand] init failed", e);
-    el("loading").style.display = "block";
-    el("loading").textContent = "⚠ " + (e && e.message ? e.message : "camera/model failed — check webcam permission and internet");
+    el("loading").hidden = false;
+    el("loading").textContent = "⚠ " + (e && e.name === "NotAllowedError"
+      ? "camera blocked — allow it in the address bar and this retries itself"
+      : (e && e.message ? e.message : "camera/model failed — check webcam + internet"));
+    setTimeout(boot, 4000);      // self-heal: permission granted later just works
   }
-});
+}
+boot();
 
 // --- WebSocket ---
 function connect() {
@@ -95,12 +112,6 @@ function send(obj) { if (conn) conn.send(obj); }
 // --- per-frame loop ---
 function loop(now) {
   if (!running) return;
-  if (lastFrameT) {
-    const dt = now - lastFrameT;
-    fps = fps ? fps * 0.9 + (1000 / dt) * 0.1 : 1000 / dt;
-  }
-  lastFrameT = now;
-
   let landmarks = null;
   try {
     const res = landmarker.detectForVideo(video, now);
@@ -111,7 +122,6 @@ function loop(now) {
   else if (grabbed) endGrab(now);   // hand left frame while grabbing -> release
 
   draw(landmarks);
-  updateHud();
   requestAnimationFrame(loop);
 }
 
@@ -119,7 +129,6 @@ function processHand(lm, now) {
   const tip = lm[INDEX_TIP];
   const handW = dist(lm[INDEX_MCP], lm[PINKY_MCP]) || 0.001;
   const pinchRatio = dist(lm[THUMB_TIP], lm[INDEX_TIP]) / handW;
-  el("pinch").textContent = pinchRatio.toFixed(2);
 
   // Grab state machine (hysteresis).
   if (!grabbed && pinchRatio < GRAB_ON) startGrab(now);
@@ -224,19 +233,5 @@ function draw(landmarks) {
   }
 }
 
-function updateHud() {
-  el("fps").textContent = fps ? fps.toFixed(0) : "—";
-  const s = el("grabstate");
-  s.textContent = grabbed ? "GRABBED" : "open";
-  s.className = grabbed ? "grabbed" : "";
-}
-
-// --- controls (thumbup/down/recal are real protocol messages; no-op server-side
-//     until the ranker/aiming phases wire them) ---
-el("thumbup").addEventListener("click", () => send({ t: P.WAND_FEEDBACK, value: 1 }));
-el("thumbdown").addEventListener("click", () => send({ t: P.WAND_FEEDBACK, value: -1 }));
-el("recal").addEventListener("click", () => send({ t: P.WAND_RECAL, tw: Math.round(performance.now()) }));
-el("cycle").addEventListener("click", () => {
-  aimSection++;
-  console.log("[cvwand] cycle section ->", aimSection, "(aim routing wired in P3/P5)");
-});
+// (No on-screen controls: the hand is the whole interface. Thumbs/recal remain
+// protocol messages the hardware wand can still send; nothing here needs them.)

@@ -30,7 +30,7 @@ V = 1
 
 
 def check_static() -> None:
-    for path in ("/stage/", "/section/", "/shared/protocol.js"):
+    for path in ("/console/", "/editor/", "/section/", "/shared/protocol.js"):
         with urllib.request.urlopen(HTTP + path, timeout=3) as r:
             body = r.read()
             assert r.status == 200 and body, f"static {path} -> {r.status}"

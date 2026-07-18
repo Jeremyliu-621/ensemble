@@ -1,0 +1,47 @@
+/* Wand Maestro — cozy pixel theme, shared by console + section + friends.
+   Fonts are vendored (web/vendor/fonts, OFL): Silkscreen = chunky display
+   caps, Pixelify Sans = friendly readable body. Palette matches the cozy
+   room mock: warm cream paper, dark cocoa ink, one bright accent per role. */
+
+@font-face {
+  font-family: "Silkscreen";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../vendor/fonts/silkscreen-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Silkscreen";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../vendor/fonts/silkscreen-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Pixelify Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("../vendor/fonts/pixelify-sans.woff2") format("woff2");
+}
+
+:root {
+  --px-display: "Silkscreen", "Courier New", monospace;
+  --px-body: "Pixelify Sans", "Segoe UI", sans-serif;
+
+  --paper: #f0e6d2;        /* page background */
+  --card: #faf4e6;         /* panel / card surface */
+  --card-deep: #e7dcc4;    /* recessed wells (tracks, bars) */
+  --ink: #362619;          /* primary text + borders */
+  --ink-soft: #8a7358;     /* secondary text */
+  --ink-faint: #c9b8a0;
+
+  --purple: #6c4fd8;       /* CTA / join */
+  --green: #3fae4a;        /* play / connected / gesture */
+  --red: #d9534a;          /* stop-ish / alerts */
+  --blue: #4a90d8;         /* lift bar */
+  --link: #49b8e8;         /* hub link cables */
+
+  --shadow: 3px 3px 0 rgba(54, 38, 25, 0.18);
+  --border: 2px solid var(--ink);
+}

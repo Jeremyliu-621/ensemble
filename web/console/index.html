@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f0e6d2">
+  <title>Wand Maestro — Console</title>
+  <link rel="icon" href="../assets/pixel/logo_wand.png">
+  <link rel="stylesheet" href="../shared/pixel.css">
+  <style>
+    /* ── Maestro Console, cozy-pixel edition. ─────────────────────────────────
+       The room IS the interface: a top-down pixel living room fills the
+       screen; the live camera (your hand = the wand) is the hub in the
+       middle; every phone is a little pixel handset wired to the hub. Cream
+       paper chrome, chunky ink borders, hard offset shadows, one accent
+       colour per instrument everywhere it appears. Fonts + palette come from
+       ../shared/pixel.css. */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: var(--px-body); color: var(--ink); overflow: hidden;
+      background: var(--paper);
+      display: grid; grid-template-rows: 62px 1fr 140px; height: 100vh; }
+    img { image-rendering: pixelated; user-select: none; -webkit-user-drag: none; }
+    .panel { background: var(--card); border: var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+
+    /* ═══ header ═══ */
+    #top { display: flex; align-items: center; gap: .9rem; padding: 0 .8rem;
+      margin: 10px 10px 0; background: var(--card); border: var(--border); border-radius: 10px;
+      box-shadow: var(--shadow); }
+    #top .logo { width: 26px; height: 26px; }
+    #top h1 { font: 700 15px/1 var(--px-display); letter-spacing: .02em; white-space: nowrap; }
+    .kv { font: 700 9px/1.2 var(--px-display); text-transform: uppercase; color: var(--ink-soft);
+      white-space: nowrap; display: flex; align-items: center; gap: .35rem; }
+    .kv b { color: var(--ink); font-weight: 700; }
+    .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--red);
+      border: 1.5px solid var(--ink); }
+    .dot.ok { background: var(--green); }
+    #top .sp { flex: 1; }
+    #tempoctl { display: flex; align-items: center; gap: .4rem; padding: .3rem .5rem;
+      border: 2px solid var(--card-deep); border-radius: 8px; }
+    #tempoctl .bpm { font: 700 12px var(--px-display); }
+    .tickbtn { width: 26px; height: 26px; cursor: pointer; font: 700 13px/1 var(--px-display);
+      color: var(--ink); background: var(--card); border: 2px solid var(--ink); border-radius: 7px;
+      box-shadow: 2px 2px 0 rgba(54,38,25,.18); }
+    .tickbtn:active { transform: translate(1px, 1px); box-shadow: none; }
+    .tbtn { cursor: pointer; font: 700 10px var(--px-display); text-transform: uppercase;
+      color: #fff; border: 2px solid var(--ink); border-radius: 8px; padding: .5rem .75rem;
+      background: var(--purple); box-shadow: var(--shadow); text-decoration: none; white-space: nowrap; }
+    .tbtn:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 rgba(54,38,25,.18); }
+    .tbtn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(54,38,25,.18); }
+    #nav { display: flex; gap: .2rem; margin-left: .1rem; padding-left: .6rem;
+      border-left: 2px solid var(--card-deep); }
+    #nav a { font: 700 9px var(--px-display); text-transform: uppercase; color: var(--ink-soft);
+      text-decoration: none; padding: .4rem .45rem; border-radius: 6px; white-space: nowrap; }
+    #nav a:hover { color: var(--ink); background: var(--card-deep); }
+
+    /* ═══ main: score | playground | wand ═══ */
+    #main { display: grid; grid-template-columns: 200px 1fr 168px; gap: 10px; padding: 10px; min-height: 0; }
+    .side { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .ph { font: 700 10px var(--px-display); letter-spacing: .08em; text-transform: uppercase;
+      color: var(--ink); padding: .65rem .75rem .45rem; display: flex; justify-content: space-between;
+      align-items: baseline; flex: none; }
+    .ph .sub { font: 600 11px var(--px-body); text-transform: none; letter-spacing: 0; color: var(--ink-soft); }
+    .scroll { overflow-y: auto; flex: 1; min-height: 0; }
+    .scroll::-webkit-scrollbar { width: 8px; }
+    .scroll::-webkit-scrollbar-thumb { background: var(--ink-faint); border-radius: 4px; }
+
+    /* left: track lanes, colour-keyed to the room cards (JS sets border colour) */
+    .lane { margin: 0 .55rem .5rem; padding: .35rem .5rem .45rem; border-radius: 8px;
+      background: #fdfaf2; border: 2px solid var(--card-deep); border-left-width: 5px; }
+    .lane .lbl { display: flex; align-items: center; gap: .35rem; margin-bottom: 3px; }
+    .lane .lbl .ico { width: 20px; height: 20px; flex: none; }
+    .lane .lbl .nm { font: 700 9px var(--px-display); text-transform: uppercase; letter-spacing: .03em; }
+    .lane .lbl .who { font: 600 10px var(--px-body); color: var(--ink-soft); margin-left: auto; }
+    .lane .lbl .star { font-size: 9px; }
+    .lane canvas { width: 100%; height: 30px; display: block; }
+    #leftempty { padding: .9rem .8rem; color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
+    #leftempty a { color: var(--purple); }
+
+    /* MIDI drop zone — bottom of the score column */
+    #dropwrap { flex: none; padding: .55rem; border-top: 2px solid var(--card-deep); }
+    #drop { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+      padding: .7rem .6rem; border: 2px dashed var(--ink-faint); border-radius: 9px; background: #fdfaf2;
+      text-align: center; transition: border-color .12s, background .12s, transform .08s; }
+    #drop:hover { border-color: var(--purple); }
+    #drop.over { border-color: var(--purple); border-style: solid; background: #f2ecff;
+      transform: translateY(-1px); box-shadow: 2px 2px 0 rgba(54,38,25,.15); }
+    #drop.busy { border-color: var(--blue); border-style: solid; }
+    #drop.err { border-color: var(--red); background: #fbeaea; }
+    #drop .di { font-size: 18px; line-height: 1; }
+    #drop .dt { font: 700 9px var(--px-display); text-transform: uppercase; letter-spacing: .04em; color: var(--ink); }
+    #drop .ds { font: 600 11px var(--px-body); color: var(--ink-soft); line-height: 1.3; max-width: 22ch; }
+
+    /* ═══ the playground ═══ */
+    #room { position: relative; border-radius: 12px; overflow: hidden; touch-action: none;
+      border: 3px solid var(--ink); box-shadow: var(--shadow);
+      background-color: #efe7d6;
+      background-image:
+        linear-gradient(rgba(54,38,25,.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(54,38,25,.08) 1px, transparent 1px);
+      background-size: 30px 30px; }
+    #links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #links line { stroke-linecap: round; }
+    #links .flow { stroke-dasharray: 4 8; animation: flow 1.1s linear infinite; }
+    @keyframes flow { to { stroke-dashoffset: -12; } }
+
+    /* the hub: live camera in the middle of the room */
+    #hub { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: clamp(190px, 27%, 300px); z-index: 5; }
+    #hublbl { width: fit-content; margin: 0 auto 5px; padding: .3rem .55rem;
+      font: 700 8px var(--px-display); letter-spacing: .1em; text-transform: uppercase; color: var(--ink);
+      background: var(--card); border: 2px solid var(--ink); border-radius: 7px; box-shadow: 2px 2px 0 rgba(54,38,25,.25); }
+    #cambox { position: relative; aspect-ratio: 4/3; border-radius: 9px; overflow: hidden;
+      border: 3px solid var(--ink); background: #191410; box-shadow: var(--shadow); }
+    #camframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    #camhint { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: .3rem;
+      align-items: center; justify-content: center; text-align: center; padding: .5rem;
+      background: #241c14; }
+    #camhint .big { font: 700 9px var(--px-display); text-transform: uppercase; color: #f5ead2; }
+    #camhint .sub { font: 600 11px var(--px-body); color: #bfae94; line-height: 1.35; }
+    #camhint a { color: #c9b3ff; }
+    #campop { position: absolute; right: 5px; top: 5px; z-index: 4; color: #f5ead2; font-size: .85rem;
+      text-decoration: none; text-shadow: 0 1px 3px #000; opacity: .7; }
+    #campop:hover { opacity: 1; }
+
+    /* instrument cards: little pixel handsets (doubled phones share a card) */
+    .card { position: absolute; transform: translate(-50%, -50%); z-index: 6; width: 92px;
+      cursor: grab; user-select: none; touch-action: none; text-align: center; }
+    .card:active { cursor: grabbing; }
+    .card .box { position: relative; border-radius: 10px; padding: 5px 5px 4px; background: #453425;
+      border: 2px solid var(--ink); box-shadow: var(--shadow);
+      transition: transform .1s, box-shadow .15s, border-color .15s; }
+    .card img { display: block; width: 100%; height: 46px; object-fit: contain; border-radius: 5px;
+      padding: 4px; background: color-mix(in srgb, var(--c, #8a6d4f) 30%, #fdf8ee);
+      border: 1px solid rgba(0, 0, 0, .3); }
+    .card .nm { font: 700 8px var(--px-display); color: #f5ead2; text-transform: uppercase;
+      letter-spacing: .04em; margin-top: 4px; }
+    .card .mem { display: flex; justify-content: center; gap: 3px; margin-top: 3px; flex-wrap: wrap; }
+    .card .chip { font: 700 10px/1.3 var(--px-body); padding: 0 4px; border-radius: 4px; color: #241a10;
+      background: var(--c, #c9b8a0); }
+    .card .chip.wait { opacity: .5; }
+    .card .xn { position: absolute; top: -8px; right: -8px; min-width: 19px; height: 19px; border-radius: 10px;
+      background: var(--c, #8a6d4f); color: #241a10; font: 700 10px/16px var(--px-display); padding: 0 4px;
+      border: 2px solid var(--ink); }
+    .card.hit .box { transform: scale(1.08); }
+    .card.aimed .box { border-color: #fff;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--c, #8a6d4f) 70%, transparent), var(--shadow); }
+    .card.ghost .box { border-style: dashed; opacity: .85; }
+    .card.dropped { filter: grayscale(.75) opacity(.65); }
+
+    /* in-room hints. The QR lives permanently in the top-right corner —
+       anyone can walk up and scan, no button to find first. */
+    #roomqr { position: absolute; right: 12px; top: 12px; z-index: 4;
+      text-align: center; padding: .55rem .65rem; background: var(--card); border: var(--border);
+      border-radius: 10px; box-shadow: 2px 2px 0 rgba(54,38,25,.2); }
+    #roomqr #qr { width: 116px; height: 116px; background: #fff; padding: 5px; border-radius: 4px;
+      border: 2px solid var(--card-deep); margin: 0 auto; }
+    #roomqr #qr svg { width: 100%; height: 100%; display: block; }
+    #roomhint { position: absolute; left: 12px; bottom: 10px; z-index: 7; font: 600 12px var(--px-body);
+      color: var(--ink-soft); background: var(--card); border: 2px solid var(--ink); border-radius: 8px;
+      padding: .35rem .6rem; pointer-events: none; max-width: 310px; line-height: 1.45;
+      box-shadow: 2px 2px 0 rgba(54,38,25,.2); }
+    #roomhint b { color: var(--ink); }
+
+    /* ═══ right: wand control ═══ */
+    #rightcol .body { padding: .15rem .7rem .6rem; overflow-y: auto; }
+    #action { padding: .6rem .5rem .55rem; border: 2px solid var(--card-deep); border-radius: 9px;
+      text-align: center; background: #fdfaf2; }
+    #action .did { font: 700 8px var(--px-display); letter-spacing: .12em; text-transform: uppercase;
+      color: var(--ink-soft); }
+    #action .what { font: 700 13px var(--px-display); text-transform: uppercase; color: var(--green);
+      margin-top: .3rem; min-height: 1.3em; }
+    #action .oct { display: block; font: 600 12px var(--px-body); text-transform: none; color: var(--blue); }
+    #action .wandimg { width: 56px; height: auto; margin-top: .35rem; }
+
+    .gbar { margin: .5rem 0; }
+    .gbar .lbl { display: flex; justify-content: space-between; align-items: baseline;
+      font: 700 8px var(--px-display); text-transform: uppercase; letter-spacing: .08em;
+      color: var(--ink-soft); margin-bottom: 3px; }
+    .gbar .lbl b { font: 700 10px var(--px-display); color: var(--ink); }
+    .gbar .track { height: 12px; border-radius: 5px; background: var(--card-deep); overflow: hidden;
+      border: 2px solid var(--ink); }
+    .gbar .fill { height: 100%; width: 0; transition: width .18s ease-out; --bar: var(--green);
+      background: repeating-linear-gradient(90deg, var(--bar) 0 7px, transparent 7px 10px); }
+    .gbar.g-size .fill { --bar: #e8a13c; }
+    .gbar.g-lift .fill { --bar: var(--blue); }
+    .gbar.g-swirl .fill { --bar: #8e5bd4; }
+
+    /* the CV cheat-sheet, floating in the room: what each hand move does.
+       pointer-events off + below the phone cards (z 6), so it never blocks
+       dragging — a card slid over it simply covers it. */
+    #moves { position: absolute; left: 12px; top: 12px; z-index: 4; width: 186px;
+      pointer-events: none; border: 2px solid var(--ink); border-radius: 9px;
+      background: var(--card); box-shadow: 2px 2px 0 rgba(54,38,25,.2);
+      padding: .45rem .55rem .4rem; }
+    #moves .mh { font: 700 8px var(--px-display); letter-spacing: .12em; text-transform: uppercase;
+      color: var(--ink-soft); margin-bottom: .2rem; }
+    #moves .mv { display: flex; gap: .45rem; align-items: flex-start; padding: .3rem 0; }
+    #moves .mv + .mv { border-top: 1px solid var(--card-deep); }
+    #moves .ic { font-size: 13px; line-height: 1.2; flex: none; }
+    #moves b { display: block; font: 700 8px var(--px-display); text-transform: uppercase;
+      letter-spacing: .02em; }
+    #moves i { display: block; font: 600 10px var(--px-body); font-style: normal;
+      color: var(--ink-soft); line-height: 1.3; }
+
+    #status { margin-top: .55rem; display: grid; grid-template-columns: 1fr 1fr; gap: .4rem; }
+    #status .cell { padding: .45rem .3rem; border-radius: 8px; border: 2px solid var(--card-deep);
+      background: #fdfaf2; text-align: center; }
+    #status .cell .k { font: 700 7px var(--px-display); letter-spacing: .1em; text-transform: uppercase;
+      color: var(--ink-soft); }
+    #status .cell .v { font: 700 11px var(--px-display); color: var(--ink); margin-top: 3px; }
+    #status .cell .v.good { color: var(--green); }
+
+    /* ═══ bottom: transport + live roll ═══ */
+    #bottom { display: flex; align-items: stretch; gap: 10px; padding: 0 10px 10px; }
+    #transport { display: flex; align-items: center; gap: .55rem; flex: none; padding: 0 .8rem;
+      background: var(--card); border: var(--border); border-radius: 10px; box-shadow: var(--shadow); }
+    .pbtn { width: 48px; height: 42px; border-radius: 9px; cursor: pointer; font-size: 1.05rem;
+      border: 2px solid var(--ink); color: #fff; background: var(--green); box-shadow: var(--shadow); }
+    .pbtn:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 rgba(54,38,25,.18); }
+    .pbtn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(54,38,25,.18); }
+    .pbtn.stop { background: var(--card); color: var(--ink); width: 42px; }
+    .pbtn.warn { background: var(--red); width: 42px; }
+    #pos { font: 700 9px var(--px-display); text-transform: uppercase; color: var(--ink-soft);
+      padding: .45rem .55rem; border: 2px solid var(--card-deep); border-radius: 8px; }
+    #pos b { color: var(--ink); }
+    #rollwrap { position: relative; flex: 1; border-radius: 10px; overflow: hidden;
+      border: var(--border); box-shadow: var(--shadow); background: #fdfaf2; }
+    #rollcanvas { width: 100%; height: 100%; display: block; }
+    #nowplaying { position: absolute; left: 10px; top: 6px; font: 600 12px var(--px-body);
+      color: var(--ink-soft); pointer-events: none; }
+    #nowplaying b { color: var(--ink); }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div id="top">
+    <img class="logo" src="../assets/pixel/logo_wand.png" alt="">
+    <h1>WAND MAESTRO</h1>
+    <span class="kv"><span class="dot" id="conndot"></span> <b id="connlbl">connecting</b></span>
+    <span class="kv"><b id="pcount">0</b> devices</span>
+    <span class="kv">wand <span class="dot" id="wanddot"></span> <b id="wandvar">—</b></span>
+    <span class="sp"></span>
+    <span class="kv" id="songkv">song <b id="songname">—</b></span>
+    <div id="tempoctl">
+      <span class="kv">tempo</span>
+      <span class="bpm"><span id="bpmlbl">100</span> BPM</span>
+      <button class="tickbtn" id="tdown" title="slower">−</button>
+      <button class="tickbtn" id="tup" title="faster">+</button>
+    </div>
+    <nav id="nav">
+      <a href="../editor/" target="_blank" title="drop a MIDI, edit the piano roll">🎹 editor</a>
+    </nav>
+  </div>
+
+  <div id="main">
+    <!-- LEFT: the score -->
+    <div class="side panel" id="leftcol">
+      <div class="ph"><span>Tracks</span><span class="sub" id="barslbl"></span></div>
+      <div class="scroll" id="lanes"></div>
+      <div id="leftempty">Built-in loop playing.<br>Drop a MIDI below and every instrument
+        shows up here — and as a phone in the room. Fine-tune notes in the
+        <a href="../editor/" target="_blank">editor</a>.</div>
+      <div id="dropwrap">
+        <label id="drop" for="midifile">
+          <span class="di">🎵</span>
+          <span class="dt">Drop a MIDI here</span>
+          <span class="ds">or click to choose — replaces the song</span>
+        </label>
+        <input id="midifile" type="file" accept=".mid,.midi,audio/midi" hidden>
+      </div>
+    </div>
+
+    <!-- CENTER: the playground -->
+    <div id="room">
+      <svg id="links" preserveAspectRatio="none"></svg>
+      <div id="hub">
+        <div id="hublbl">Laptop hub</div>
+        <div id="cambox">
+          <iframe id="camframe" title="webcam wand" allow="camera"></iframe>
+          <a id="campop" href="../cvwand/" target="_blank" title="open camera full-size">⤢</a>
+          <div id="camhint" hidden></div>
+        </div>
+      </div>
+      <div id="roomqr">
+        <div id="qr"></div>
+      </div>
+      <div id="roomhint" hidden><b>Drag</b> a phone to where it really sits ·
+        <b>tap</b> it to conduct just that instrument</div>
+      <div id="moves">
+        <div class="mh">✨ Moves</div>
+        <div class="mv"><span class="ic">🤏</span><div><b>Pinch + move</b><i>conduct — shape the music</i></div></div>
+        <div class="mv"><span class="ic">🙌</span><div><b>Slow lift (pinched)</b><i>swell — builds to a climax</i></div></div>
+        <div class="mv"><span class="ic">🤫</span><div><b>Small, calm moves</b><i>hush — softer and simpler</i></div></div>
+        <div class="mv"><span class="ic">⚡</span><div><b>Big, fast moves</b><i>full orchestra + harmony</i></div></div>
+        <div class="mv"><span class="ic">✋</span><div><b>Hold open palm</b><i>play / pause the show</i></div></div>
+        <div class="mv"><span class="ic">👋</span><div><b>Palm swipe ←→</b><i>rewind / skip 4 bars</i></div></div>
+        <div class="mv"><span class="ic">🎯</span><div><b>Tap a phone card</b><i>solo that instrument</i></div></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: wand control -->
+    <div class="side panel" id="rightcol">
+      <div class="ph"><span>Wand control</span><span class="sub">your gesture</span></div>
+      <div class="body">
+        <div id="action">
+          <div class="did">Current gesture</div>
+          <div class="what" id="what">—</div>
+          <img class="wandimg" src="../assets/pixel/wand_wood.png" alt="">
+        </div>
+        <div class="gbar"><div class="lbl">energy <b id="v-energy">0.00</b></div><div class="track"><div class="fill" id="f-energy"></div></div></div>
+        <div class="gbar g-size"><div class="lbl">size <b id="v-size">0.00</b></div><div class="track"><div class="fill" id="f-size"></div></div></div>
+        <div class="gbar g-lift"><div class="lbl">lift <b id="v-vertical">0.00</b></div><div class="track"><div class="fill" id="f-vertical"></div></div></div>
+        <div class="gbar g-swirl"><div class="lbl">swirl <b id="v-rotation">0.00</b></div><div class="track"><div class="fill" id="f-rotation"></div></div></div>
+
+        <div id="status">
+          <div class="cell"><div class="k">sync</div><div class="v" id="spread">—</div></div>
+          <div class="cell"><div class="k">tempo</div><div class="v" id="bpmcell">100</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM: transport + live piano roll -->
+  <div id="bottom">
+    <div id="transport">
+      <button class="pbtn" id="start" title="start">▶</button>
+      <button class="pbtn stop" id="stop" title="stop">■</button>
+      <button class="pbtn warn" id="panic" title="all notes off">✷</button>
+      <span id="pos">bar <b id="barpos">–</b></span>
+    </div>
+    <div id="rollwrap">
+      <canvas id="rollcanvas"></canvas>
+      <div id="nowplaying">press ▶ to start</div>
+    </div>
+  </div>
+
+  <!-- if the console's JS ever dies, say so ON SCREEN instead of failing silent -->
+  <div id="jserr" style="display:none; position:fixed; left:12px; bottom:12px; z-index:999; max-width:70ch;
+    background:#fbeaea; color:#7a1d16; border:2px solid #d9534a; border-radius:8px; padding:.6rem .8rem;
+    font:12px/1.5 ui-monospace,monospace; white-space:pre-wrap;"></div>
+  <script>
+    window.addEventListener("error", (e) => {
+      const b = document.getElementById("jserr"); b.style.display = "block";
+      b.textContent += `⚠ ${e.message}\n   ${(e.filename || "").split("/").slice(-1)}:${e.lineno}\n`;
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      const b = document.getElementById("jserr"); b.style.display = "block";
+      b.textContent += `⚠ (promise) ${e.reason}\n`;
+    });
+  </script>
+  <script src="../vendor/qrcode.js"></script>
+  <script type="module" src="./console.js"
+    onerror="document.getElementById('jserr').style.display='block';document.getElementById('jserr').textContent='⚠ console.js failed to load or parse';"></script>
+</body>
+</html>

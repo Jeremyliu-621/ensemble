@@ -70,7 +70,7 @@ def _style_score(rows: list, context: dict) -> float:
     style = context.get("style", "free")
     n = len(rows)
     mean_dur = sum(r[1] for r in rows) / n
-    if style == "harmonize":                 # THE style: chord tones, held, few
+    if style == "harmonize":                 # chord tones, held, few
         ch = context.get("chord") or {}
         root = int(ch.get("root", 0))
         pcs = {(root + o) % 12 for o in ((0, 3, 7) if ch.get("minor") else (0, 4, 7))}
@@ -79,6 +79,29 @@ def _style_score(rows: list, context: dict) -> float:
         if in_chord >= 0.75 and long_frac >= 0.6 and n <= 5:
             return 1.0
         return 0.4 if in_chord >= 0.5 else 0.1
+    if style == "passing":                   # short soft tones strictly BETWEEN melody pairs
+        melody = sorted(context.get("melody") or [])
+        if len(melody) < 2:
+            return 0.5
+        pairs = list(zip(melody, melody[1:]))
+        def fits(r):
+            return any(min(a[2], b[2]) < r[2] < max(a[2], b[2])
+                       and a[0] <= r[0] < b[0] for a, b in pairs)
+        good = sum(1 for r in rows if fits(r) and r[1] <= 2 and r[3] <= 0.7) / n
+        return 1.0 if good >= 0.8 and n <= 6 else 0.4 if good >= 0.5 else 0.1
+    if style == "arpeggio":                  # even chord-tone figure below the melody
+        ch = context.get("chord") or {}
+        root = int(ch.get("root", 0))
+        pcs = {(root + o) % 12 for o in ((0, 3, 7) if ch.get("minor") else (0, 4, 7))}
+        in_chord = sum(1 for r in rows if int(r[2]) % 12 in pcs) / n
+        onsets = sorted(r[0] for r in rows)
+        gaps = [b - a for a, b in zip(onsets, onsets[1:])]
+        even = (len(set(gaps)) <= 1) if gaps else False
+        mel_lo = min((m[2] for m in (context.get("melody") or [])), default=128)
+        below = sum(1 for r in rows if r[2] < mel_lo) / n
+        if in_chord >= 0.9 and even and below >= 0.8 and 6 <= n <= 16:
+            return 1.0
+        return 0.4 if in_chord >= 0.7 else 0.1
     if style == "dense":
         return 1.0 if (n >= 5 and mean_dur <= 3) else 0.3
     if style == "calm":
@@ -88,12 +111,22 @@ def _style_score(rows: list, context: dict) -> float:
         if len(melody) < 2 or n < 2:
             return 0.5
         return 1.0 if (melody[-1][2] - melody[0][2]) * (rows[-1][2] - rows[0][2]) < 0 else 0.3
-    if style == "echo":
+    if style == "echo":                      # prev-melody pcs, in THIS bar's gaps, soft
         prev = context.get("prev_melody") or []
         if not prev:
             return 0.5
         prev_pcs = {int(p[2]) % 12 for p in prev}
-        return 1.0 if sum(1 for r in rows if int(r[2]) % 12 in prev_pcs) >= n / 2 else 0.3
+        occupied = set()
+        for (on, dur, _m, *rest) in (context.get("melody") or []):
+            for t in range(int(on), min(16, int(on + dur))):
+                occupied.add(t)
+        mel_min = min((int(m[2]) for m in (context.get("melody") or [])), default=127)
+        def clear(r):
+            in_gap = all(t not in occupied for t in range(int(r[0]), min(16, int(r[0] + r[1]))))
+            return in_gap or r[2] <= mel_min - 7    # a soft underlap also answers cleanly
+        good = sum(1 for r in rows
+                   if int(r[2]) % 12 in prev_pcs and clear(r) and r[3] <= 0.5) / n
+        return 1.0 if good >= 0.75 and n <= 4 else 0.4 if good >= 0.5 else 0.1
     return 1.0
 
 
@@ -120,10 +153,15 @@ def reward(prompt: str, response: str) -> float:
         return 0.0
     context = _context_from(prompt) or {}
     key_pcs = _pcs(int(context.get("key", 0)))
+    # Register windows are STYLE-dependent: passing tones live in the melody's
+    # register, arpeggios low, pads in between. One window for all was folding
+    # melody-register devices into the pad range — caught by the dataset gate.
+    reg = {"passing": (52, 88), "echo": (48, 84), "arpeggio": (40, 72)}.get(
+        (context.get("style") or ""), (45, 74))
     r = 0.25 * (len(rows) / max(1, len(obj["notes"])))
     r += 0.20 * (sum(1 for x in rows if _grid_ok(x)) / len(rows))
     r += 0.20 * (sum(1 for x in rows if int(x[2]) % 12 in key_pcs) / len(rows))
-    r += 0.10 * (sum(1 for x in rows if REG_LO <= x[2] <= REG_HI) / len(rows))
+    r += 0.10 * (sum(1 for x in rows if reg[0] <= x[2] <= reg[1]) / len(rows))
     r += 0.15 * _style_score(rows, context)
     r += 0.10 * _clearance(rows, context)
     return min(1.0, r)

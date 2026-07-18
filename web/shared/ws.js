@@ -8,7 +8,7 @@ const BACKOFF_START = 500;
 const BACKOFF_MAX = 4000;
 
 export class Conn {
-  constructor({ role, session, name = "", key = null }) {
+  constructor({ role, session, name = "", key = null, ephemeral = false }) {
     this.role = role;
     this.session = session;
     this.name = name;
@@ -16,7 +16,12 @@ export class Conn {
     // role in one tab (e.g. the stage + its overlay) don't share a client-id and
     // clobber each other in the server registry.
     this._key = key || role;
-    this.clientId = localStorage.getItem(`wm.clientId.${this._key}`) || null;
+    // Ephemeral clients (dashboard views: console, editor) get a fresh identity
+    // per page load and never persist it — two tabs of the same page must be two
+    // clients, or they fight over one hub slot. Only clients that REJOIN as
+    // themselves (sections keep their instrument, the wand its slot) persist.
+    this._ephemeral = ephemeral;
+    this.clientId = ephemeral ? null : (localStorage.getItem(`wm.clientId.${this._key}`) || null);
     this.ws = null;
     this.welcome = null;
     this._queue = [];               // sends before the socket opens, flushed on connect
@@ -67,8 +72,8 @@ export class Conn {
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg.t === WELCOME) {
         this.welcome = msg;
-        this.clientId = msg.client_id;
-        localStorage.setItem(`wm.clientId.${this._key}`, msg.client_id);
+        this.clientId = msg.client_id;   // reconnects keep THIS tab's identity
+        if (!this._ephemeral) localStorage.setItem(`wm.clientId.${this._key}`, msg.client_id);
         if (this._onOpen) this._onOpen(msg);
         return;
       }

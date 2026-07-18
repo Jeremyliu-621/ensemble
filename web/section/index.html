@@ -3,38 +3,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="theme-color" content="#0b0d12">
+  <meta name="theme-color" content="#f0e6d2">
   <title>Wand Maestro — Section</title>
+  <link rel="icon" href="../assets/pixel/logo_wand.png">
+  <link rel="stylesheet" href="../shared/pixel.css">
   <style>
+    /* Phone = one instrument in the cozy-pixel orchestra. The audience sees
+       this screen propped up around the room, so it leads with a big pixel
+       instrument icon + name; diagnostics live in the small HUD below. */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; font-family: ui-monospace, "Courier New", monospace; background: #0c0608; color: #f6e7c9; overflow: hidden; }
-    #join {
-      position: fixed; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 1rem;
-      background: radial-gradient(circle at 50% 40%, #1a1206, #0c0608); cursor: pointer;
-    }
-    #join h1 { font-size: clamp(2rem, 12vw, 4rem); font-weight: 800; letter-spacing: -0.03em; color: #e7c583; text-shadow: 0 2px 0 #7a4a12, 0 3px 10px #000; }
-    #join p { opacity: 0.6; font-size: 1rem; }
+    html, body { height: 100%; font-family: var(--px-body); background: var(--paper); color: var(--ink); overflow: hidden; }
+    img { image-rendering: pixelated; user-select: none; -webkit-user-drag: none; }
+
+    #join { position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 1rem; cursor: pointer; text-align: center; }
+    #join img { width: 72px; height: 72px; }
+    #join h1 { font: 700 clamp(1.4rem, 8vw, 2.6rem)/1.2 var(--px-display); letter-spacing: .02em;
+      text-shadow: 3px 3px 0 rgba(54,38,25,.15); }
+    #join p { color: var(--ink-soft); font-size: 1.05rem; }
+    #join .chip { font: 700 10px var(--px-display); text-transform: uppercase; color: #fff;
+      background: var(--purple); border: 2px solid var(--ink); border-radius: 8px;
+      padding: .5rem .8rem; box-shadow: var(--shadow); }
+
     #stage { position: fixed; inset: 0; display: none; flex-direction: column; }
+    #insthead { display: flex; flex-direction: column; align-items: center; gap: .5rem; padding-top: 8vh; }
+    #insthead img { width: clamp(84px, 30vw, 128px); height: auto; padding: 12px;
+      background: var(--card); border: 3px solid var(--ink); border-radius: 14px; box-shadow: var(--shadow); }
+    #instnm { font: 700 clamp(.8rem, 5vw, 1.2rem) var(--px-display); text-transform: uppercase; letter-spacing: .05em; }
     #pulse { flex: 1; display: flex; align-items: center; justify-content: center;
-             font-size: clamp(3rem, 20vw, 8rem); font-weight: 800; transition: background 60ms ease-out; }
-    #hud { padding: 0.75rem 1rem; font: 12px ui-monospace, monospace; background: #0c0608; border-top: 1px solid #3a2c1a;
-           display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 1rem; }
-    #hud .k { opacity: 0.5; }
+      font: 700 clamp(2.2rem, 16vw, 5rem) var(--px-display); transition: background 60ms ease-out; }
+    #hud { padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom)); font-size: 13px;
+      background: var(--card); border-top: 3px solid var(--ink);
+      display: grid; grid-template-columns: 1fr 1fr; gap: .3rem 1rem; }
+    #hud .k { font: 700 8px var(--px-display); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-soft); }
     #hud .full { grid-column: 1 / -1; }
-    #trimrow { display: flex; align-items: center; gap: 0.5rem; }
-    #trimrow input { flex: 1; }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; }
-    .dot.ok { background: #46d17a; }
+    #trimrow { display: flex; align-items: center; gap: .5rem; }
+    #trimrow input { flex: 1; accent-color: var(--purple); }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+      background: var(--red); border: 1.5px solid var(--ink); }
+    .dot.ok { background: var(--green); }
+    #leave { width: 100%; margin-top: .35rem; padding: .6rem; font: 700 10px var(--px-display);
+      text-transform: uppercase; color: var(--red); background: var(--card);
+      border: 2px solid var(--red); border-radius: 8px; cursor: pointer;
+      box-shadow: 2px 2px 0 rgba(54,38,25,.18); }
+    #leave:active { transform: translate(1px, 1px); box-shadow: none; }
+
+    /* Phones suspend audio when the screen sleeps; resuming needs a real tap.
+       These overlays make that unmissable instead of a tiny HUD label. */
+    #unmute, #leftscreen { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: .7rem; cursor: pointer; text-align: center;
+      background: var(--paper); }
+    #unmute h1, #leftscreen h1 { font-size: 4rem; }
+    #unmute b, #leftscreen b { font: 700 1rem var(--px-display); text-transform: uppercase; }
+    #unmute .s, #leftscreen .s { color: var(--ink-soft); font-size: .95rem; max-width: 30ch; }
   </style>
 </head>
 <body>
   <div id="join">
+    <img src="../assets/pixel/logo_wand.png" alt="">
     <h1>TAP TO JOIN</h1>
     <p id="joinsub">the orchestra</p>
+    <div class="chip">🔊 sound on · keep me face up</div>
   </div>
 
   <div id="stage">
+    <div id="insthead">
+      <img id="instico" src="../assets/pixel/icon_synth.png" alt="">
+      <div id="instnm">—</div>
+    </div>
     <div id="pulse">—</div>
     <div id="hud">
       <div class="full"><span class="dot" id="dot"></span> <span id="sid">connecting…</span></div>
@@ -49,7 +85,20 @@
         <input type="range" id="trim" min="-100" max="100" value="0" step="1">
         <span id="trimval">0ms</span>
       </div>
+      <div class="full"><button id="leave">✕ leave the orchestra</button></div>
     </div>
+  </div>
+
+  <div id="unmute" style="display:none">
+    <h1>🔇</h1>
+    <p><b>Tap to unmute</b></p>
+    <p class="s">your phone paused the audio while the screen was off</p>
+  </div>
+
+  <div id="leftscreen" style="display:none">
+    <h1>👋</h1>
+    <p><b>You left the orchestra</b></p>
+    <p class="s">tap anywhere to rejoin</p>
   </div>
 
   <script type="module" src="./section.js"></script>

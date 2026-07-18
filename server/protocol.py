@@ -10,6 +10,7 @@ from __future__ import annotations
 HELLO = "hello"                 # {role, session, client_id|null, name?}  first frame on every connection
 CLOCK_PING = "clock.ping"       # {id, t0}   t0 = client performance.now() ms, echoed back
 SECTION_READY = "section.ready" # {}         audio unlocked + samples loaded
+SECTION_LEAVE = "section.leave" # {}         explicit goodbye -> remove the slot immediately
 WAND_IMU = "wand.imu"           # {seq, frames:[[tw_ms, ax,ay,az, gx,gy,gz], ...]}  hw/phone wand
 WAND_POSE = "wand.pose"         # {seq, frames:[[tw_ms, x, y, z, roll_deg], ...]}   CV (webcam) wand
 WAND_GRAB = "wand.grab"         # {state:"start"|"end", tw}
@@ -24,6 +25,7 @@ STAGE_ASSIGN = "stage.assign"   # {section_id, instrument}
 STAGE_RECORD = "stage.record"   # {sha256, bytes, dur_s}  finished room recording -> ledger
 ADMIN_CMD = "admin.cmd"         # {cmd:"start"|"stop"|"clicktest"|"resync"|"allnotesoff"|"tempo"|"force", args?}
 SONG_LOAD = "song.load"         # {name, data}  data = base64 of a .mid file -> replaces the song
+SONG_EDIT = "song.edit"         # {song:{name,bpm,parts:[{instrument,is_drum,is_melody,notes:[[bar,on16,dur16,pitch,vel],...]}]}}
 SONG_HUM = "song.hum"           # {frames:[[t_ms, midi_float, rms], ...]}  hummed melody -> new song
 SONG_FILE = "song.file"         # {name}  load songs/<name>.mid from the server's disk
 CLOCK_REPORT = "clock.report"   # {theta, rtt}  section's own sync estimate (debug/health readout)

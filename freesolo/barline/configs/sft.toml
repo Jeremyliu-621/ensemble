@@ -11,7 +11,7 @@ id = "neuroscore/wand-barline"
 
 [train]
 epochs = 2
-max_examples = 4800          # rebuilt with harmonize as THE primary style
+max_examples = 12000         # theory-device dataset, self-validation gated
 lora_rank = 32
 lora_alpha = 64
 max_context_tokens = 1024

@@ -21,6 +21,8 @@ class SectionInfo:
     instrument: str
     azimuth_deg: float = 0.0
     ready: bool = False
+    volume: float = 1.0      # 0..1, scales this section's note velocities
+    muted: bool = False
 
 
 @dataclass

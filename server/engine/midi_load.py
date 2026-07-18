@@ -18,7 +18,8 @@ import mido
 from engine.song import BarData, Note, Song, SongPart
 from engine.theory import MAJOR, triad
 
-MAX_BARS = 64   # cap loop length so a long MIDI doesn't produce an enormous song
+MAX_BARS = 64    # cap loop length so a long MIDI doesn't produce an enormous song
+ROLL_CAP = 2000  # cap notes sent per track to the editor (our loops are far shorter)
 
 # General-MIDI program -> one of our sprite/timbre instruments (best-effort).
 def gm_instrument(program: int, is_drum: bool) -> str:
@@ -174,14 +175,111 @@ def load_midi_bytes(data: bytes, name: str = "uploaded") -> tuple[Song, list[dic
         for pb in part_bars:
             pb.sort()
         song_parts.append(SongPart(pi["instrument"], pi["is_drum"], pi["is_melody"], part_bars))
-        # compact piano-roll for the editor: [[bar, onset16, dur16, pitch], ...]
+        # editable piano-roll for the editor: [[bar, onset16, dur16, pitch, vel], ...]
         roll = []
         for bi, notes in enumerate(part_bars):
-            for (on, dur, pitch, _v) in notes:
-                roll.append([bi, on, dur, pitch])
-                if len(roll) >= 400:
-                    break
-        pi["roll"] = roll
+            for (on, dur, pitch, v) in notes:
+                roll.append([bi, on, dur, pitch, v])
+        pi["roll"] = roll[:ROLL_CAP]
 
     song = Song(name=name, bpm=round(bpm, 1), key_root=key_root, bars=bars, parts=song_parts)
+    # Make the fitted harmony canonical: bare-melody files get their inertia-fit
+    # progression written into the bars, so arpeggios/candidates/pads all agree.
+    from engine.harmony import apply_chords
+    apply_chords(song)
+    return song, part_info
+
+
+def build_song_from_grid(parts: list[dict], bpm: float, name: str = "edited") -> tuple[Song, list[dict]]:
+    """Turn editor-authored grid notes into the same Song/part_info the MIDI loader
+    produces, so a hand-edited song plays through the identical conductor path.
+
+    `parts`: [{"instrument","is_drum","is_melody","name"?,
+               "notes":[[bar, onset16, dur16, pitch, vel], ...]}, ...]
+    Velocities are 0..1. Bars/onsets/durations are clamped to the 16-slot grid.
+    Key + per-bar chords are estimated exactly like load_midi_bytes so the gesture
+    overlay stays musical.
+    """
+    def clamp_note(bar, on, dur, pitch, vel):
+        bar = max(0, int(bar))
+        on = max(0, min(15, int(on)))
+        dur = max(1, min(16 - on, int(dur)))
+        return bar, on, dur, max(0, min(127, int(pitch))), round(max(0.0, min(1.0, float(vel))), 2)
+
+    # normalise + find the loop length
+    clean: list[list] = []
+    n_bars = 1
+    for p in parts:
+        rows = [clamp_note(*(n + [0.7] * (5 - len(n)))[:5]) for n in p.get("notes", []) if len(n) >= 4]
+        clean.append(rows)
+        for (bar, *_r) in rows:
+            n_bars = max(n_bars, bar + 1)
+    n_bars = min(MAX_BARS, n_bars)
+
+    # duration-weighted key estimate over non-drum notes
+    weighted_pc: dict[int, float] = defaultdict(float)
+    for p, rows in zip(parts, clean):
+        if p.get("is_drum"):
+            continue
+        for (_b, _on, dur, pitch, _v) in rows:
+            weighted_pc[pitch % 12] += dur
+    key_root = _estimate_key(weighted_pc) if weighted_pc else 0
+
+    # melody part: the flagged one, else the non-drum part with the highest mean pitch
+    melody_idx = next((i for i, p in enumerate(parts) if p.get("is_melody")), None)
+    if melody_idx is None:
+        best_mean = -1.0
+        for i, (p, rows) in enumerate(zip(parts, clean)):
+            if p.get("is_drum") or not rows:
+                continue
+            mean = sum(n[3] for n in rows) / len(rows)
+            if mean > best_mean:
+                best_mean, melody_idx = mean, i
+
+    # bars: chord estimate from harmony notes; melody from the melody part
+    bars: list[BarData] = []
+    prev_chord = (key_root, False)
+    for b in range(n_bars):
+        melody: list[Note] = []
+        harmony_pcs: list[tuple[int, int]] = []
+        for i, (p, rows) in enumerate(zip(parts, clean)):
+            if p.get("is_drum"):
+                continue
+            for (bar, on, dur, pitch, _v) in rows:
+                if bar != b:
+                    continue
+                if i == melody_idx:
+                    melody.append((on, dur, pitch))
+                else:
+                    harmony_pcs.append((pitch, pitch % 12))
+        if harmony_pcs:
+            root = min(harmony_pcs, key=lambda x: x[0])[1]
+            pcs = {pc for _p, pc in harmony_pcs}
+            minor = ((root + 3) % 12 in pcs) and ((root + 4) % 12 not in pcs)
+            prev_chord = (root, minor)
+        elif melody:
+            prev_chord = (melody[0][2] % 12, False)
+        root, minor = prev_chord
+        melody.sort()
+        bars.append(BarData(root, minor, triad(root, minor), melody))
+
+    # arrangement parts + editor roll
+    song_parts: list[SongPart] = []
+    part_info: list[dict] = []
+    for i, (p, rows) in enumerate(zip(parts, clean)):
+        part_bars: list[list] = [[] for _ in range(n_bars)]
+        for (bar, on, dur, pitch, vel) in rows:
+            if bar < n_bars:
+                part_bars[bar].append((on, dur, pitch, vel))
+        for pb in part_bars:
+            pb.sort()
+        is_melody = (i == melody_idx)
+        song_parts.append(SongPart(p["instrument"], bool(p.get("is_drum")), is_melody, part_bars))
+        roll = [[b, on, dur, pitch, v] for b, notes in enumerate(part_bars) for (on, dur, pitch, v) in notes]
+        part_info.append({"channel": i, "name": p.get("name") or p["instrument"], "program": 0,
+                          "instrument": p["instrument"], "is_drum": bool(p.get("is_drum")),
+                          "is_melody": is_melody, "note_count": len(rows),
+                          "mean_pitch": 0.0, "roll": roll[:ROLL_CAP]})
+
+    song = Song(name=name, bpm=round(float(bpm), 1), key_root=key_root, bars=bars, parts=song_parts)
     return song, part_info

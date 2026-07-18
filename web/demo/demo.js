@@ -14,6 +14,8 @@ const synth = new Synth(clock, null);
 let seq = 0;
 
 const COLORS = {
+  verbatim: "#888", hush: "#7fd1ff", harmonize: "#e7c583", arpeggio: "#c77fff",
+  passing: "#6fcf7f", swelling: "#e5a23d",
   rhythmic_dense: "#e5686a", contrary_motion: "#7fd1ff", sustained: "#6fcf7f",
   delayed: "#e5a23d", lower_imitation: "#c77fff", rest: "#777", generated: "#e7c583",
 };
@@ -39,6 +41,10 @@ el("song-zelda").addEventListener("click", () => {
   conn.send({ t: P.SONG_FILE, name: "zelda-fairy.mid" });
   log("loading Great Fairy Fountain…");
 });
+el("song-zora").addEventListener("click", () => {
+  conn.send({ t: P.SONG_FILE, name: "zora-domain.mid" });
+  log("loading Zora's Domain…");
+});
 el("song-canon").addEventListener("click", () => {
   conn.send({ t: P.SONG_FILE, name: "canon.mid" });
   log("loading Canon in D…");
@@ -56,13 +62,16 @@ function imu(accel, gyro, ay, durMs, n) {
   }
   return out;
 }
+// The final ear-ranked vocabulary, one button per device. Frame recipes are
+// solved against server/gestures/features.py so each lands in its style band:
+// energy=accel/12 · size=accel*dur/6 · rotation=gyro/200 · vertical=ay/9.8.
 const GESTURES = {
-  "🌊 BIG WAVE → busy":        () => imu(12, 0, 0, 500, 30),
-  "🍃 GENTLE → calm":          () => imu(0.3, 0, 0, 250, 10),
-  "🌀 TWIST → counter-melody": () => imu(1, 250, 0, 600, 30),
-  "⚡ SHARP FLICK → sting":    () => imu(12, 0, 0, 300, 18),
-  "⬆ LIFT → octave up":        () => imu(2, 0, 9.0, 900, 40),
-  "🌅 SWELL → 4-bar climax":   () => imu(6, 0, 8.5, 1200, 50),
+  "🙌 PUSH → chords (harmonize)":  () => imu(9, 0, 0, 700, 30),     // e=.85: firm push
+  "🍃 GENTLE → hush":              () => imu(0.3, 0, 0, 600, 12),   // target≈0 → thin out
+  "🌀 TWIST → arpeggio":           () => imu(2, 160, 0, 700, 30),   // rotation .8 lifts it
+  "🪶 LIGHT TOUCH → passing tones": () => imu(7, 0, 0, 700, 30),    // e=.68: gentlest push
+  "⚡ SHARP FLICK → sting":        () => imu(12, 0, 0, 300, 18),    // accent, instant
+  "🌅 SWELL → 4-bar build":        () => imu(6, 0, 8.5, 1200, 50),  // slow lift arms the arc
 };
 for (const [name, gen] of Object.entries(GESTURES)) {
   const b = document.createElement("button");
@@ -169,8 +178,8 @@ conn.on(P.ENGINE_STATE, (m) => {
     el("imeter").style.left = i >= 0.5 ? "50%" : `${50 - w}%`;
     el("imeter").style.background = i >= 0.5 ? "#e7c583" : "#7fd1ff";
   }
-  el("choice").textContent = m.last_choice || "—";
-  el("choice").style.color = COLORS[m.last_choice] || "#ddd";
+  el("choice").textContent = m.device || m.last_choice || "—";
+  el("choice").style.color = COLORS[(m.device || m.last_choice || "").split(" ")[0]] || "#ddd";
   const src = m.decision_source || "?";
   el("source").textContent = src === "model" ? "🧠 MODEL decided (your trained brain)" : `${src} decided`;
   el("source").className = src;
@@ -179,7 +188,7 @@ conn.on(P.ENGINE_STATE, (m) => {
     ? `gesture read as: energy ${g.energy.toFixed(2)} · vertical ${g.vertical.toFixed(2)} · ` +
       `rotation ${g.rotation.toFixed(2)} · ${g.duration.toFixed(2)}s`
     : "";
-  log(`decision: ${m.last_choice} [${src}] — ${m.song}`);
+  log(`device: ${m.device || "—"} · decision: ${m.last_choice} [${src}] — ${m.song}`);
   renderMeta();
 });
 conn.on(P.ROSTER, (m) => {

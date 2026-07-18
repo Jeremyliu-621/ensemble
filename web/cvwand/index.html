@@ -4,63 +4,39 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Wand Maestro — CV Wand</title>
+  <link rel="stylesheet" href="../shared/pixel.css">
   <style>
+    /* Seamless camera wand: no buttons, no dials. The camera starts itself;
+       your hand is the interface (pinch = grab, open palm = transport).
+       Lives inside the console's laptop-hub screen, so it stays dark. */
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; font-family: ui-monospace, "Courier New", monospace; background: #0c0608; color: #f6e7c9; overflow: hidden; }
-    #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; }
-    #view { position: relative; flex: 1; background: #000; overflow: hidden; }
+    html, body { height: 100%; background: #191410; color: #f5ead2; overflow: hidden;
+      font-family: var(--px-body); }
+    #view { position: fixed; inset: 0; background: #000; }
     #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; visibility: hidden; }
     #canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-    #start {
-      position: absolute; inset: 0; display: flex; flex-direction: column;
-      align-items: center; justify-content: center; gap: 0.75rem; cursor: pointer;
-      background: radial-gradient(circle at 50% 40%, #1a1206, #0c0608); z-index: 5;
-    }
-    #start h1 { font-size: clamp(1.8rem, 8vw, 3rem); font-weight: 800; letter-spacing: -0.02em; color: #e7c583; text-shadow: 0 2px 0 #7a4a12; }
-    #start p { opacity: 0.6; max-width: 32ch; text-align: center; line-height: 1.4; }
-    #loading { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%);
-               background: #0009; padding: 0.4rem 0.9rem; border-radius: 999px; font: 13px ui-monospace, monospace; z-index: 4; }
-    #hud { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.25rem 1rem;
-           padding: 0.6rem 1rem; background: #0c0608; border-top: 1px solid #3a2c1a; font: 12px ui-monospace, monospace; }
-    #hud .k { opacity: 0.5; }
-    #hud .grabbed { color: #46d17a; font-weight: 700; }
-    #controls { display: flex; gap: 0.5rem; padding: 0.5rem 1rem 0.9rem; background: #05070b; }
-    #controls button { flex: 1; font: 700 13px ui-monospace, monospace; padding: 0.7rem 0.5rem; border: 0;
-                       border-radius: 8px; background: #2a2016; color: #f6e7c9; cursor: pointer; }
-    #controls button:active { transform: translateY(1px); }
-    #controls .up { background: #2f8f56; } #controls .down { background: #8f3030; }
-    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; }
-    .dot.ok { background: #46d17a; }
+    #dot { position: absolute; left: 8px; top: 8px; z-index: 6; width: 9px; height: 9px;
+      border-radius: 50%; background: #d9534a; border: 1.5px solid #000; opacity: .9; }
+    #dot.ok { background: #3fae4a; }
+    #loading { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%);
+      z-index: 5; text-align: center; font-size: 13px; line-height: 1.5; color: #cbbfa8;
+      background: rgba(10, 8, 6, .85); padding: .6rem .9rem; border-radius: 10px; max-width: 34ch; }
+    #loading b, #loading a { color: #f5ead2; }
+    #hint { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); z-index: 5;
+      font: 700 8px var(--px-display); text-transform: uppercase; letter-spacing: .08em;
+      color: #f5ead2; background: rgba(10, 8, 6, .7); padding: .3rem .6rem; border-radius: 8px;
+      white-space: nowrap; transition: opacity 1s; pointer-events: none; }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <div id="wrap">
-    <div id="view">
-      <video id="video" playsinline muted></video>
-      <canvas id="canvas"></canvas>
-      <div id="loading" style="display:none">loading hand tracker…</div>
-      <div id="start">
-        <h1>🪄 CV Wand</h1>
-        <p>Uses your webcam to track your hand. <b>Pinch</b> (thumb + index) to “grab” the music, move to conduct, release to let go.</p>
-        <p style="opacity:0.9"><b>Tap to start camera</b></p>
-      </div>
-    </div>
-
-    <div id="hud">
-      <div><span class="k">conn</span> <span class="dot" id="dot"></span> <span id="variant">cv</span></div>
-      <div><span class="k">state</span> <span id="grabstate">open</span></div>
-      <div><span class="k">pinch</span> <span id="pinch">—</span></div>
-      <div><span class="k">fps</span> <span id="fps">—</span></div>
-    </div>
-
-    <div id="controls">
-      <button class="up" id="thumbup">👍 good</button>
-      <button class="down" id="thumbdown">👎 no</button>
-      <button id="recal">🎯 aim@laptop</button>
-      <button id="cycle">↻ section</button>
-    </div>
+  <div id="view">
+    <video id="video" playsinline muted></video>
+    <canvas id="canvas"></canvas>
+    <span id="dot" title="wand link"></span>
+    <div id="loading">starting camera…</div>
+    <div id="hint" hidden>🤏 pinch = conduct · ✋ palm = play/pause</div>
   </div>
-
   <script type="module" src="./cvwand.js"></script>
 </body>
 </html>

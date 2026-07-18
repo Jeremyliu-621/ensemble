@@ -26,6 +26,8 @@ const TRAIN_MS = 12_000;      // until points span this long, use offset-only (b
 const MIN_FIT = 8;            // ...and this many good points
 const MAX_DRIFT = 0.0005;     // clamp b to ±500 PPM so a re-fit is never audible
 const SNAP_MS = 50;           // a serverNow jump bigger than this signals a resync
+const EPOCH_MS = 3000;        // pong further than this from the model's prediction
+                              // = the timebase itself changed, not jitter
 
 const A2P_SAMPLES = 5;        // median window for the performance->audio anchor
 
@@ -111,7 +113,23 @@ export class Clock {
     if (t0 === undefined) return;
     this._pending.delete(msg.id);
     const t1 = performance.now();
-    this._points.push({ local: (t0 + t1) / 2, server: msg.ts, rtt: t1 - t0 });
+    const sample = { local: (t0 + t1) / 2, server: msg.ts, rtt: t1 - t0 };
+    // Epoch guard: the server clock is per-process monotonic, so a RESTARTED
+    // server answers from a brand-new timebase (and a laptop waking from sleep
+    // froze ours). Blending those samples with the old ones poisons the fit for
+    // up to MAX_AGE_MS — serverNow() lands minutes off and every consumer of
+    // server time (roll, playhead, scheduling) silently breaks while the ws
+    // looks healthy. Seconds of disagreement can't be jitter: drop the dead
+    // timebase and retrain from this sample alone (self-heals in one pong).
+    if (this._a !== null && Math.abs(this._a + this._b * sample.local - sample.server) > EPOCH_MS) {
+      const jump = sample.server - (this._a + this._b * sample.local);
+      console.warn(`[clock] server timebase changed (${(jump / 1000).toFixed(1)}s) — retraining`);
+      this._points = [];
+      this._a = null;
+      this._b = 1;
+      if (this.onResync) this.onResync(jump);
+    }
+    this._points.push(sample);
     const cutoff = performance.now() - MAX_AGE_MS;
     this._points = this._points.filter((p) => p.local >= cutoff);
     if (this._points.length > MAX_POINTS) this._points.shift();

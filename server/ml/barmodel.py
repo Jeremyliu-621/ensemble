@@ -42,11 +42,18 @@ def style_for(gesture: GestureFeatures | None) -> str:
     return "free"
 
 
-def sanitize_line(obj, key_root: int) -> list | None:
+# Style-appropriate register folds: passing tones live near the melody,
+# arpeggios low, pads in the accompaniment band. Style-blind folding would
+# silently relocate a device out of its musical register.
+STYLE_REG = {"passing": (52, 88), "echo": (48, 84), "arpeggio": (40, 72)}
+
+
+def sanitize_line(obj, key_root: int, style: str = "harmonize") -> list | None:
     """Make any {"notes": [...]} reply playable: clamp to the grid, snap to the
-    key, fold into the accompaniment register. None if nothing usable remains."""
+    key, fold into the style's register. None if nothing usable remains."""
     if not isinstance(obj, dict) or not isinstance(obj.get("notes"), list):
         return None
+    lo, hi = STYLE_REG.get(style, (REG_LO, REG_HI))
     out = []
     for row in obj["notes"][:16]:
         if not isinstance(row, (list, tuple)) or len(row) != 4:
@@ -58,9 +65,9 @@ def sanitize_line(obj, key_root: int) -> list | None:
         on = int(max(0, min(15, on)))
         dur = int(max(1, min(16 - on, dur)))
         midi = snap_to_scale(int(midi), key_root)
-        while midi > REG_HI:
+        while midi > hi:
             midi -= 12
-        while midi < REG_LO:
+        while midi < lo:
             midi += 12
         out.append((on, dur, midi, round(max(0.1, min(1.0, vel)), 3)))
     return out or None
@@ -81,12 +88,12 @@ class RemoteBarModel:
     def configured(self) -> bool:
         return bool(self.url and config.BARMODEL_NAME)
 
-    def take(self, bar_idx: int) -> list | None:
-        """The line written for exactly this bar, consumed once."""
+    def take(self, bar_idx: int) -> tuple[list, str] | None:
+        """(notes, style) written for exactly this bar, consumed once."""
         if self._cache and self._cache[0] == bar_idx:
-            notes = self._cache[1]
+            _idx, notes, style = self._cache
             self._cache = None
-            return notes
+            return notes, style
         return None
 
     def prefetch(self, bar_idx: int, context: dict, key_root: int) -> None:
@@ -121,13 +128,14 @@ class RemoteBarModel:
         finally:
             self._inflight.discard(bar_idx)
         try:
-            notes = sanitize_line(json.loads(text), key_root)
+            notes = sanitize_line(json.loads(text), key_root,
+                                  str(context.get("style") or "harmonize"))
         except (TypeError, ValueError):
             notes = None
         if notes is None:
             log.warning("bar reply unusable: %.120s", text)
             return
-        self._cache = (bar_idx, notes)
+        self._cache = (bar_idx, notes, str(context.get("style") or "harmonize"))
         log.info("bar %d: generated line, %d notes (%s)", bar_idx, len(notes), context.get("style"))
 
     def _post(self, body: bytes) -> str:
