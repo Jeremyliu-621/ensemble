@@ -73,8 +73,6 @@ export class Synth {
     const now = this.ctx.currentTime;
     if (when < now - 0.05) return;          // hopelessly late — drop
     const t = Math.max(when, now + 0.001);
-    const durSec = Math.max(0.08, (ev.dur || 200) / 1000);
-    const sustain = ev.art === "sustain";
     const peak = Math.max(0.05, ev.vel || 0.7);
 
     if (ev.art === "drum") {                // percussion voice (GM-mapped by pitch)
@@ -86,6 +84,8 @@ export class Synth {
       return;
     }
 
+    const durSec = Math.max(0.08, (ev.dur || 200) / 1000);
+    const sustain = ev.art === "sustain";
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = this.timbre ? this.timbre.wave : (sustain ? "sine" : "triangle");

@@ -20,6 +20,7 @@ const NICE = {
 };
 
 let forced = "auto";
+let recording = false;
 
 // Embed the live stage.
 el("stageframe").src = `../stagepix/?s=${encodeURIComponent(session)}`;
@@ -135,6 +136,13 @@ conn.on(P.ROSTER, (m) => {
   const g = eng.gesture;
   for (const k of ["energy", "size", "vertical", "rotation"]) el("g_" + k).textContent = g ? g[k].toFixed(2) : "—";
 
+  const rec = m.record || {};
+  recording = !!rec.recording;
+  el("reccount").textContent = rec.count || 0;
+  el("recstate").textContent = rec.recording ? `recording "${rec.label}"` : "idle";
+  el("recbtn").classList.toggle("active", recording);
+  el("recbtn").textContent = recording ? "■ Stop" : "● Record";
+
   if (m.sections.length === 0) {
     el("rows").innerHTML = `<tr><td colspan="4" class="muted">no phones yet — scan the stage QR to add instruments</td></tr>`;
   } else {
@@ -159,5 +167,9 @@ el("tempo").addEventListener("input", (e) => {
   conn.send({ t: P.ADMIN_CMD, cmd: "tempo", args: { bpm: parseInt(e.target.value, 10) } });
 });
 el("tempo").addEventListener("change", () => { tempoDragging = false; });
+el("recbtn").addEventListener("click", () => {
+  conn.send({ t: P.ADMIN_CMD, cmd: "record",
+    args: { action: recording ? "stop" : "start", label: el("reclabel").value } });
+});
 
 conn.connect();

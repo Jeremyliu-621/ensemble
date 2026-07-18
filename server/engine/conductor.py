@@ -315,8 +315,10 @@ class Conductor:
             notes = raw if part.is_melody else self._shape(raw, decision, part.is_drum)
             for (on, dur, midi, vel) in notes:
                 art = "drum" if part.is_drum else ("sustain" if dur >= 8 else "pluck")
+                # Drum-map pitches are identifiers, not pitches - never clamp/fold them.
+                midi_out = midi if part.is_drum else _clampmidi(midi)
                 events.append(self._note(sec, bar_start + on * self.s16_ms,
-                                         dur * self.s16_ms, _clampmidi(midi), max(0.12, vel), art))
+                                         dur * self.s16_ms, midi_out, max(0.12, vel), art))
 
         for (on, dur, midi, vel) in cands[choice]:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,

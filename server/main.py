@@ -40,6 +40,7 @@ from config import (
 from engine.candidates import GENERATORS
 from engine.conductor import Conductor
 from hub import ClientConn, Hub, send_json
+from recording.recorder import GestureRecorder
 from scheduler import Scheduler
 from session import Section, SessionState, WandSlot
 from showlog import ShowLog
@@ -70,7 +71,8 @@ class App:
         self.session = SessionState(name=DEFAULT_SESSION)
         self._load_session()
         self.engine = Conductor()
-        self.wand = WandRouter(self.engine)
+        self.recorder = GestureRecorder(DEFAULT_SESSION)
+        self.wand = WandRouter(self.engine, recorder=self.recorder)
         self.scheduler = Scheduler(self.engine, self.hub)
         self.aimer = WandAimer()
         self.showlog = ShowLog(DEFAULT_SESSION)
@@ -346,6 +348,11 @@ class App:
             self.engine.set_tempo(float(args.get("bpm", 100)))
         elif cmd == "force":
             self.engine.set_forced(args.get("candidate"))
+        elif cmd == "record":
+            if args.get("action") == "start":
+                self.recorder.start(args.get("label", ""))
+            else:
+                self.recorder.stop()
         await self._broadcast_roster()
 
     async def _load_song(self, conn: ClientConn, name: str, b64: str) -> None:
@@ -529,6 +536,7 @@ class App:
             entry["rtt"] = conn.rtt if conn else None
         # Engine state for the editor (tempo, manual override, current candidate).
         payload["engine"] = self.engine.status()
+        payload["record"] = self.recorder.status()
         await self.hub.broadcast(payload, roles=("stage", "admin"))
 
 

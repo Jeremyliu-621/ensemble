@@ -41,7 +41,7 @@ def build_static_response(raw_path: str) -> Response:
     url_path = urllib.parse.urlparse(raw_path).path
     rel = urllib.parse.unquote(url_path).lstrip("/")
     if rel == "":
-        rel = "stagepix/" + DIRECTORY_INDEX  # bare host -> the pixel-art stage (the front door)
+        rel = "home/" + DIRECTORY_INDEX  # bare host -> the landing menu
 
     target = (WEB_DIR / rel).resolve()
 

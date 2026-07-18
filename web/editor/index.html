@@ -123,6 +123,16 @@
           <span class="stat"><span class="k">rot</span><span id="g_rotation">—</span></span>
         </div>
       </div>
+      <div class="card">
+        <h2>Record gestures</h2>
+        <div class="muted" style="font-size:12px; margin-bottom:.5rem">Grab + move the wand to save labelled samples for training.</div>
+        <div class="row">
+          <input id="reclabel" placeholder="label (e.g. circle)"
+            style="flex:1; min-width:90px; background:var(--panel-2); color:var(--cream); border:1px solid var(--line); border-radius:6px; padding:.4rem .5rem; font-family:var(--sans)">
+          <button id="recbtn">● Record</button>
+        </div>
+        <div class="muted" style="font-size:12px; margin-top:.5rem"><span id="reccount">0</span> saved · <span id="recstate">idle</span></div>
+      </div>
     </div>
 
     <!-- CENTER: the live stage -->

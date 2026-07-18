@@ -24,11 +24,14 @@ see [`docs/ai-training.md`](docs/ai-training.md)) — all built and headless-tes
 reference) is in [`docs/audio-sync-research.md`](docs/audio-sync-research.md) — TL;DR
 we match IRCAM's Soundworks pattern; the one gap is clock-drift compensation.
 
-**Pages:** `/` → `/stagepix/` (pixel-art orchestra + QR — the front door),
-`/stage/` (plain fallback stage), `/guide/` (how it works), `/editor/` (manual
-control), `/cvwand/` (webcam wand), `/wandsim/` (phone wand, HTTPS),
-`/section/?s=lol1` (a phone as an instrument). Guide + editor are themed to match
-the pixel stage and linked from its HUD.
+**Pages:** `/` → `/home/` (landing menu), `/stagepix/` (pixel-art orchestra +
+QR), `/editor/` (control room — live stage in the centre + transport, tempo,
+MIDI drop, piano-roll, instrument assignment, gesture recorder), `/guide/` (how
+it works), `/cvwand/` (webcam wand), `/wandsim/` (phone wand, HTTPS),
+`/section/?s=lol1` (a phone as an instrument). All pages share one
+crimson+gold+serif design language. MIDI songs play their full arrangement
+across phones **including drums** (percussion synth); gestures can be recorded to
+`data/gestures/` for training a DTW/Jackknife classifier.
 
 ### Run it — the flow
 
