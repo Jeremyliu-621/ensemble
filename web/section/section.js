@@ -22,8 +22,16 @@ let noteCount = 0;
 let recvCount = 0;
 let left = false;          // true after the Leave button — stops reconnect + overlays
 
+// big pixel icon + name up top — this is what the audience sees on the phone
+const ICONS = ["drums", "piano", "bass", "violin", "cello", "viola", "flute",
+  "clarinet", "trumpet", "harp", "bell", "synth"];
+function showInstrument(inst) {
+  el("instico").src = `../assets/pixel/icon_${ICONS.includes(inst) ? inst : "synth"}.png`;
+  el("instnm").textContent = inst || "—";
+}
+
 function onPlay(ev, peak) {
-  pulse.style.background = peak >= 0.9 ? "#e7c583" : "#a8712a";
+  pulse.style.background = peak >= 0.9 ? "#a5d8a0" : "#dccfb0";
   pulse.textContent = ev.note;
   setTimeout(() => { pulse.style.background = "transparent"; pulse.textContent = "—"; }, 90);
   noteCount++;
@@ -43,7 +51,7 @@ function updateHud() {
   if (synth && synth.ctx) {
     const st = synth.ctx.state;
     el("audio").textContent = st;
-    el("audio").style.color = st === "running" ? "#6fcf7f" : "#e58a6a";
+    el("audio").style.color = st === "running" ? "#3fae4a" : "#d9534a";
     if (st !== "running") {
       synth.ctx.resume().catch(() => {});               // quiet self-heal first…
       if (!left) el("unmute").style.display = "flex";   // …and an unmissable prompt
@@ -112,12 +120,14 @@ joinScreen.addEventListener("click", async () => {
   conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
   conn.on(P.SECTION_CONFIG, (m) => {         // live instrument reassignment from the editor
     synth.setInstrument(m.instrument);
+    showInstrument(m.instrument);
     el("sid").textContent = `${myId} · ${m.instrument}`;
   });
 
   conn.onOpen((welcome) => {
     myId = welcome.config.section_id;
     synth.setInstrument(welcome.config.instrument);
+    showInstrument(welcome.config.instrument);
     el("sid").textContent = `${myId} · ${welcome.config.instrument}`;
     el("dot").classList.add("ok");
     clock.start();

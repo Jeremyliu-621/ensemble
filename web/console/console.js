@@ -31,17 +31,18 @@ const SEMI = { C: 0, "C#": 1, D: 2, "D#": 3, E: 4, F: 5, "F#": 6, G: 7, "G#": 8,
 const noteToMidi = (n) => { const m = /^([A-G]#?)(-?\d+)$/.exec(n || ""); return m ? (parseInt(m[2], 10) + 1) * 12 + SEMI[m[1]] : 60; };
 const NICE = { lower_imitation: "Lower imitation", contrary_motion: "Contrary motion", sustained: "Sustained chord",
   delayed: "Delayed echo", rhythmic_dense: "Rhythmic — busy", rhythmic: "Rhythmic — busy", rest: "Rest — silence" };
-const SPRITES = ["violin", "cello", "flute", "trumpet", "harp", "drums", "piano", "synth"];
+const ICONS = ["drums", "piano", "bass", "violin", "cello", "viola", "flute",
+  "clarinet", "trumpet", "harp", "bell", "synth"];
 
-// ── one neon accent per instrument, everywhere it appears ────────────────────
-const PALETTE = ["#ff6d5a", "#ffd166", "#6fe08b", "#c08bff", "#5aa9ff", "#5ee6d0", "#ff8fd0", "#e7c583"];
+// ── one accent per instrument, everywhere it appears (reads on cream paper) ──
+const PALETTE = ["#d9534a", "#e8a13c", "#57a639", "#8e5bd4", "#4a76d8", "#2f9e9e", "#d858a8", "#8a6d4f"];
 const colorMap = new Map();          // instrument -> colour (assigned in first-seen order)
 function colorOf(instrument) {
-  if (!instrument) return "#e7c583";
+  if (!instrument) return "#8a6d4f";
   if (!colorMap.has(instrument)) colorMap.set(instrument, PALETTE[colorMap.size % PALETTE.length]);
   return colorMap.get(instrument);
 }
-const spriteFor = (inst) => (SPRITES.includes(inst) ? inst : "synth");
+const iconFor = (inst) => `../assets/pixel/icon_${ICONS.includes(inst) ? inst : "synth"}.png`;
 
 let conn = null, clock = null, synth = null;
 let started = false, camStarted = false, audioReady = false;
@@ -137,7 +138,7 @@ function upsertCards() {
       attachDrag(node, g.key);
     }
     node.style.setProperty("--c", colorOf(g.instrument));
-    node.querySelector("img").src = `../assets/${spriteFor(g.instrument)}.png`;
+    node.querySelector("img").src = iconFor(g.instrument);
     node.querySelector(".nm").textContent = g.instrument;
     const xn = node.querySelector(".xn");
     xn.hidden = g.members.length < 2;
@@ -167,8 +168,10 @@ function drawLinks() {
       : toScreen(g.px, g.py, r);
     const c = colorOf(g.instrument);
     const aimed = g.key === aimedGroup;
-    out += `<line x1="${hub.x}" y1="${hub.y}" x2="${p.x}" y2="${p.y}" stroke="${c}" stroke-opacity="${aimed ? 0.95 : 0.4}" stroke-width="${aimed ? 3 : 1.6}"/>`;
-    out += `<line class="flow" x1="${hub.x}" y1="${hub.y}" x2="${p.x}" y2="${p.y}" stroke="${c}" stroke-opacity="${aimed ? 1 : 0.75}" stroke-width="${aimed ? 4 : 2.6}"/>`;
+    // dark underlay first so the cable reads on the busy room art
+    out += `<line x1="${hub.x}" y1="${hub.y}" x2="${p.x}" y2="${p.y}" stroke="#362619" stroke-opacity="0.3" stroke-width="${aimed ? 7 : 5.4}"/>`;
+    out += `<line x1="${hub.x}" y1="${hub.y}" x2="${p.x}" y2="${p.y}" stroke="${c}" stroke-opacity="${aimed ? 0.95 : 0.5}" stroke-width="${aimed ? 3.4 : 2}"/>`;
+    out += `<line class="flow" x1="${hub.x}" y1="${hub.y}" x2="${p.x}" y2="${p.y}" stroke="${c}" stroke-opacity="${aimed ? 1 : 0.85}" stroke-width="${aimed ? 4.4 : 3}"/>`;
   });
   el("links").innerHTML = out;
 }
@@ -285,16 +288,14 @@ function pulse(section) {
 }
 
 // ── engine state: gesture, action, lanes, transport ──────────────────────────
-let tempoDragging = false;
-el("tempo").addEventListener("pointerdown", () => (tempoDragging = true));
-el("tempo").addEventListener("pointerup", () => (tempoDragging = false));
+let bpmNow = 100;                    // last engine bpm; the header ± nudges from here
 
 function bar(id, v, max) { el("f-" + id).style.width = Math.max(0, Math.min(1, v / max)) * 100 + "%"; }
 function applyEngine(eng) {
   if (!eng) return;
   const bpm = Math.round(eng.bpm);
-  el("bpmlbl").textContent = bpm; el("bpmcell").textContent = bpm; el("bpmval").textContent = bpm;
-  if (!tempoDragging) el("tempo").value = bpm;
+  bpmNow = bpm;
+  el("bpmlbl").textContent = bpm; el("bpmcell").textContent = bpm;
   el("songname").textContent = eng.song || "—";
   el("barslbl").textContent = eng.bars ? eng.bars + " bars" : "";
   if (eng.transport) transport = eng.transport;
@@ -337,12 +338,13 @@ function renderLanes(tracks) {
   host.innerHTML = "";
   const bars = Math.max(1, ...playable.map((t) => (t.roll.length ? Math.max(...t.roll.map((x) => x[0])) + 1 : 1)));
   playable.forEach((t) => {
-    const col = t.is_drum ? "#8a8378" : colorOf(t.instrument);
+    const col = t.is_drum ? "#9a8a74" : colorOf(t.instrument);
     const lane = document.createElement("div");
     lane.className = "lane";
-    lane.style.borderLeftColor = col;
+    lane.style.borderColor = col;
     const players = (who.get(t.instrument) || []).join(" ");
-    lane.innerHTML = `<div class="lbl"><span class="nm" style="color:${col}">${t.instrument || t.name}</span>` +
+    lane.innerHTML = `<div class="lbl"><img class="ico" src="${iconFor(t.instrument)}" alt="">` +
+      `<span class="nm" style="color:${col}">${t.instrument || t.name}</span>` +
       (t.is_melody ? `<span class="star">⭐</span>` : "") +
       `<span class="who">${players || "laptop"}</span></div><canvas></canvas>`;
     host.appendChild(lane);
@@ -377,7 +379,7 @@ function drawRoll() {
   if (now === null) { requestAnimationFrame(drawRoll); return; }
   const pxPerMs = W / WINDOW_MS;
   const headX = W - FUTURE_MS * pxPerMs;
-  ctx.strokeStyle = "rgba(255,227,163,.5)"; ctx.lineWidth = 1.5 * dpr;
+  ctx.strokeStyle = "rgba(54,38,25,.5)"; ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath(); ctx.moveTo(headX, 0); ctx.lineTo(headX, H); ctx.stroke();
   for (let i = notes.length - 1; i >= 0; i--) {
     const n = notes[i];
@@ -397,8 +399,8 @@ function ingest(e) {
   if (seen.has(e.id)) return;
   seen.add(e.id);
   if (seen.size > 4000) seen.clear();
-  const col = e.art === "drum" ? "#8a8378"
-    : (e.section === P.SECTION_ALL ? "#e7c583" : colorOf(secInstrument.get(e.section)));
+  const col = e.art === "drum" ? "#9a8a74"
+    : (e.section === P.SECTION_ALL ? "#8a6d4f" : colorOf(secInstrument.get(e.section)));
   notes.push({ at: e.at, dur: e.dur || 200, pitch: noteToMidi(e.note), color: col });
   const delay = clock && clock.theta !== null ? Math.max(0, Math.min(1500, e.at - clock.serverNow())) : 0;
   setTimeout(() => pulse(e.section), delay);
@@ -467,10 +469,13 @@ el("start").addEventListener("click", async () => {
 });
 el("stop").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "stop" }));
 el("panic").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "allnotesoff" }));
-el("tempo").addEventListener("input", (e) => {
-  el("bpmval").textContent = e.target.value;
-  conn.send({ t: P.ADMIN_CMD, cmd: "tempo", args: { bpm: +e.target.value } });
-});
+function nudgeTempo(d) {
+  bpmNow = Math.max(60, Math.min(180, bpmNow + d));
+  el("bpmlbl").textContent = bpmNow; el("bpmcell").textContent = bpmNow;
+  conn.send({ t: P.ADMIN_CMD, cmd: "tempo", args: { bpm: bpmNow } });
+}
+el("tdown").addEventListener("click", () => nudgeTempo(-4));
+el("tup").addEventListener("click", () => nudgeTempo(4));
 
 // camera hub — MediaPipe is heavy, load only when asked
 el("camstart").addEventListener("click", async () => {
@@ -484,7 +489,7 @@ el("camstart").addEventListener("click", async () => {
     el("camstart").innerHTML =
       `<div class="big">🔒 Camera needs localhost or HTTPS</div>
        <div class="sub">On the hosting laptop open
-         <a href="${local}" style="color:var(--gold-hi)">localhost:${location.port || 80}</a>
+         <a href="${local}">localhost:${location.port || 80}</a>
          — music still works here, and phones keep using the QR.</div>`;
     return;
   }
