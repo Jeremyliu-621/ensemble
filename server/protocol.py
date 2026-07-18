@@ -14,7 +14,9 @@ WAND_IMU = "wand.imu"           # {seq, frames:[[tw_ms, ax,ay,az, gx,gy,gz], ...
 WAND_POSE = "wand.pose"         # {seq, frames:[[tw_ms, x, y, z, roll_deg], ...]}   CV (webcam) wand
 WAND_GRAB = "wand.grab"         # {state:"start"|"end", tw}
 WAND_FEEDBACK = "wand.feedback" # {value: 1|-1}
-WAND_RECAL = "wand.recal"       # {tw}
+WAND_RECAL = "wand.recal"       # {tw}        zero the aiming yaw
+WAND_TOUCH = "wand.touch"       # {pad:0-11, state:"down"|"up"}  MPR121 pads: 0-5 force a candidate
+WAND_RANGE = "wand.range"       # {mm}        ToF distance -> proximity tension (fx.tension)
 STAGE_PLACE = "stage.place"     # {section_id, azimuth_deg, pos:[x,y,z]}
 STAGE_ASSIGN = "stage.assign"   # {section_id, instrument}
 ADMIN_CMD = "admin.cmd"         # {cmd:"start"|"stop"|"clicktest"|"resync"|"allnotesoff"|"tempo"|"force", args?}
@@ -28,7 +30,9 @@ SECTION_CONFIG = "section.config"  # {section_id, instrument, color, samples}
 SCHED_NOTES = "sched.notes"     # {events:[{id, section, at, dur, note, vel, art}]}
 SCHED_CANCEL = "sched.cancel"   # {ids?:[...], section?, after?} | {allnotesoff:true}
 ROSTER = "roster"               # {playing, sections:[...], wand:{...}}
-WAND_STATE = "wand.state"       # {grabbed, aim_section, yaw_deg}   -> stage only, ~15 Hz
+WAND_STATE = "wand.state"       # {grabbed, aim_section, yaw_deg}   -> stage/admin, throttled
+ANNOUNCE = "announce"           # {text, audio_b64?, mime?}  commentator line -> stage/admin
+FX_TENSION = "fx.tension"       # {value: 0..1}  proximity build-up -> sections + stage
 ERR = "err"                     # {code, msg}
 
 # Special section id meaning "every section plays this event".

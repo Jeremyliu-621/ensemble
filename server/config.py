@@ -36,6 +36,14 @@ DISCONNECT_GRACE_S = 60.0  # keep a section's slot (instrument/placement) this l
 DATA_DIR = SERVER_DIR / "data"
 DECISIONS_DIR = DATA_DIR / "decisions"   # per-run JSONL decision logs (training harvest)
 DECISION_LOG = os.environ.get("WM_DECISION_LOG", "1") != "0"
+SHOWS_DIR = pathlib.Path(os.environ.get("WM_SHOWS_DIR", str(DATA_DIR / "shows")))
+
+# --- Backboard.io commentator (optional; unset key = inert) ---
+BACKBOARD_URL = os.environ.get("WM_BACKBOARD_URL", "https://app.backboard.io/api")
+BACKBOARD_KEY = os.environ.get("WM_BACKBOARD_KEY", "")
+BACKBOARD_ASSISTANT = os.environ.get("WM_BACKBOARD_ASSISTANT", "")  # reuse one assistant = set-to-set memory
+BACKBOARD_PROVIDER = os.environ.get("WM_BACKBOARD_PROVIDER", "openai")
+BACKBOARD_MODEL = os.environ.get("WM_BACKBOARD_MODEL", "gpt-4o")
 
 # --- Decision model (optional; unset = heuristic ranker only) ---
 # Any OpenAI-compatible serving base works, e.g. a Freesolo deploy:

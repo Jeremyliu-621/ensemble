@@ -114,15 +114,20 @@ Reward/heuristic sync warning: the GRPO environments inline ports of
 - Every decision, from either brain or the fallback, is logged back into the
   harvest — playing the instrument improves the next training run.
 
-## Other AI integrations (scoped, not yet built)
+## Non-model backend (built — see show_test.py)
 
-- **Voice drops** (ElevenLabs `eleven_flash_v2_5` WebSocket, ~100-150ms
-  end-to-end): a server hook that announces set moments; free tier is ~10
-  min/month — the $6 Starter tier covers a demo weekend.
-- **Set-memory commentator** (Backboard.io — MLH partner, $5 free credits):
-  one assistant with cross-thread memory fed section joins/drops and gesture
-  stats; its ElevenLabs-voiced lines become the "DJ drop" layer. Backboard is
-  a stateful assistant API, not a router — fan-out stays in our server.
-- **Solana cNFT** of the finished set (Crossmint staging/devnet, one REST
-  call): hash of the decision log + stats in the metadata. Helius's mint API
-  is deprecated; don't use it.
+- **Set-memory commentator** (`server/announcer.py`): a Backboard.io
+  assistant (MLH partner, $5 free credits) with `memory: "Auto"` follows the
+  set — joins, drops, songs, vibe checks — and its one-line reactions toast
+  on the stage (`announce`). Set `WM_BACKBOARD_KEY`; pin
+  `WM_BACKBOARD_ASSISTANT` to keep memory across shows. Unset = inert.
+  Voice: Backboard's `voice.tts` (ElevenLabs) can be added to the same call;
+  the stage already plays `audio_b64` if present.
+- **Show ledger** (`server/showlog.py`): every structural moment is
+  hash-chained; `admin stop` writes `server/data/shows/*.manifest.json` whose
+  head hash commits to the whole set. `tools/mint_cnft.py` mints it as a
+  Solana cNFT via Crossmint staging (devnet, dry-runs without a key).
+- **Hardware wand surface**: aiming (gyro yaw → the aimed phone carries the
+  line, stage glows it), MPR121 pads → forced candidates, ToF distance →
+  `fx.tension` filter sweeps on every phone. Firmware contract:
+  [`hardware-wand.md`](hardware-wand.md).

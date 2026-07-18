@@ -238,6 +238,30 @@ conn.on(P.SCHED_NOTES, (m) => {
   }
 });
 conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
+conn.on(P.FX_TENSION, (m) => synth.setTension(m.value));
+
+// Wand aim: glow the performer the conductor is pointing at.
+conn.on(P.WAND_STATE, (m) => {
+  performers.forEach((p) => {
+    if (p.node) p.node.style.filter = p.id === m.aim_section ? "drop-shadow(0 0 12px #e7c583)" : "";
+  });
+});
+
+// Commentator lines from the announcer -> a fading toast over the stage.
+conn.on(P.ANNOUNCE, (m) => {
+  const d = document.createElement("div");
+  d.textContent = m.text;
+  d.style.cssText = "position:absolute;left:50%;top:12%;transform:translateX(-50%);" +
+    "background:rgba(20,12,8,.88);color:#e7c583;padding:10px 22px;border:1px solid #a8712a;" +
+    "border-radius:8px;font-size:20px;z-index:40;max-width:70%;text-align:center;" +
+    "transition:opacity .6s;opacity:0;pointer-events:none";
+  el("stagewrap").appendChild(d);
+  requestAnimationFrame(() => { d.style.opacity = "1"; });
+  setTimeout(() => { d.style.opacity = "0"; setTimeout(() => d.remove(), 700); }, 6000);
+  if (m.audio_b64) {
+    try { new Audio(`data:${m.mime || "audio/mpeg"};base64,${m.audio_b64}`).play(); } catch {}
+  }
+});
 
 conn.onOpen((welcome) => {
   el("status").textContent = `session ${welcome.config.session}`;

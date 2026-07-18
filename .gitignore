@@ -15,6 +15,7 @@ server/data/prefs/
 server/data/gestures/
 server/data/models/*.pkl
 server/data/decisions/
+server/data/shows/
 freesolo/*/dataset/
 
 # Firmware secrets

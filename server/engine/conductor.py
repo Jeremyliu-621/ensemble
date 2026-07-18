@@ -38,6 +38,7 @@ class Conductor:
         self._gesture: GestureFeatures | None = None
         self._last_choice: str | None = None
         self._forced: str | None = None                 # editor override; None = let the ranker choose
+        self._aim: str | None = None                    # wand-aimed section (spatial mode)
         self._model = RemoteModel()                     # trained policy (WM_MODEL_URL); optional
         self._barmodel = RemoteBarModel()               # trained line writer (WM_BARMODEL_URL)
         self._decision: Decision | None = None          # the policy's active answer, until the next gesture
@@ -117,7 +118,7 @@ class Conductor:
         pass  # grab edges could cut sustains; not needed for the slice
 
     def on_aim(self, section_id: str | None) -> None:
-        pass
+        self._aim = section_id
 
     def on_feedback(self, value: int) -> None:
         self._datalog.feedback(value)
@@ -205,10 +206,15 @@ class Conductor:
 
         # Distribute parts so multiple phones are genuinely different instruments:
         #   2+ sections -> section[0] plays melody, the rest play the accompaniment
+        #                  (wand aim overrides: the aimed phone carries the line solo)
         #   1 section   -> it plays both
         #   0 sections  -> laptop (stage) plays everything via SECTION_ALL
         n = len(self._sections)
-        if n >= 2:
+        aim = self._aim if any(s.section_id == self._aim for s in self._sections) else None
+        if n >= 2 and aim:
+            melody_sec = next(s.section_id for s in self._sections if s.section_id != aim)
+            responder_secs = [aim]
+        elif n >= 2:
             melody_sec = self._sections[0].section_id
             responder_secs = [s.section_id for s in self._sections[1:]]
         elif n == 1:

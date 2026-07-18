@@ -24,6 +24,7 @@ import websockets
 from websockets.asyncio.server import ServerConnection, serve
 
 import protocol as P
+from announcer import Announcer
 from clocksync import server_time_ms
 from config import (
     CERT_DIR,
@@ -33,12 +34,16 @@ from config import (
     PROTOCOL_VERSION,
     WS_PATH,
 )
+from engine.candidates import GENERATORS
 from engine.conductor import Conductor
 from hub import ClientConn, Hub, send_json
 from scheduler import Scheduler
 from session import Section, SessionState, WandSlot
+from showlog import ShowLog
 from static_files import build_static_response
-from wandio import WandRouter
+from wandio import WandAimer, WandRouter
+
+PAD_CANDIDATES = list(GENERATORS)   # MPR121 pads 0-5 force these; pad up = auto
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)-6s %(levelname)-7s %(message)s")
 log = logging.getLogger("main")
@@ -63,9 +68,17 @@ class App:
         self.engine = Conductor()
         self.wand = WandRouter(self.engine)
         self.scheduler = Scheduler(self.engine, self.hub)
+        self.aimer = WandAimer()
+        self.showlog = ShowLog(DEFAULT_SESSION)
+        self.announcer = Announcer(self._announce_line)
         self.lan_ip = detect_lan_ip()
         self._wand_client: str | None = None    # who owns the wand slot
         self._last_roster_ms = 0.0              # throttle for health-ping-triggered rosters
+        self._last_aim: str | None = None
+        self._last_state_ms = 0.0               # wand.state broadcast throttle
+        self._tension = 0.0
+        self._last_tension_ms = 0.0
+        self._vibe_task: asyncio.Task | None = None
 
     # --- static + WS routing ---
     def process_request(self, connection: ServerConnection, request):
@@ -120,6 +133,8 @@ class App:
             self.session.wand = WandSlot(connected=True, variant=variant)
             self._wand_client = client_id
             self.wand.reset()                   # a fresh wand must not inherit a stale grab
+            self.showlog.record("wand.connect", variant=variant)
+            self.announcer.poke("wand.connect", f"The conductor's wand just came alive ({variant}).")
             log.info("wand connected (variant=%s)", variant)
         elif role in ("stage", "admin"):
             # Phone wand over the LAN (HTTPS on :8443 — DeviceMotion needs a secure
@@ -190,14 +205,22 @@ class App:
 
         if t == P.SECTION_READY:
             if conn.section_id and conn.section_id in self.session.sections:
-                self.session.sections[conn.section_id].ready = True
+                section = self.session.sections[conn.section_id]
+                first_ready = not section.ready
+                section.ready = True
                 self.engine.on_sections_changed(self.session.engine_sections())
+                if first_ready:
+                    self.showlog.record("section.join", section=conn.section_id,
+                                        instrument=section.instrument)
+                    self.announcer.poke("section.join",
+                                        f"Phone section {conn.section_id} joined as {section.instrument} — "
+                                        f"{len(self.session.engine_sections())} sections live.")
                 await self._broadcast_roster()
             return
 
         # Show control: only the stage/editor may drive the show — the join QR
         # is public, so audience phones must not be able to stop or hijack it.
-        if t in (P.ADMIN_CMD, P.SONG_LOAD, P.STAGE_ASSIGN) and conn.role not in ("stage", "admin"):
+        if t in (P.ADMIN_CMD, P.SONG_LOAD, P.STAGE_ASSIGN, P.STAGE_PLACE) and conn.role not in ("stage", "admin"):
             await send_json(conn.ws, {"t": P.ERR, "code": "forbidden", "msg": "controller role required"})
             return
 
@@ -206,9 +229,11 @@ class App:
             return
 
         # Wand input -> router (buffers frames per grab, hands the engine a
-        # complete gesture window on release).
+        # complete gesture window on release). IMU frames also feed aiming.
         if t == P.WAND_IMU:
-            self.wand.on_imu(msg.get("frames", []))
+            frames = msg.get("frames", [])
+            self.wand.on_imu(frames)
+            await self._update_aim(frames)
             return
         if t == P.WAND_POSE:
             self.wand.on_pose(msg.get("frames", []))
@@ -219,14 +244,24 @@ class App:
         if t == P.WAND_FEEDBACK:
             self.engine.on_feedback(int(msg.get("value", 0)))
             return
+        if t == P.WAND_TOUCH:                   # MPR121 pads: 0-5 force a candidate
+            await self._wand_touch(int(msg.get("pad", -1)), msg.get("state", ""))
+            return
+        if t == P.WAND_RANGE:                   # ToF distance -> proximity tension
+            await self._wand_range(float(msg.get("mm", -1.0)))
+            return
+        if t == P.WAND_RECAL:
+            self.aimer.recal()
+            return
         if t == P.STAGE_ASSIGN:
             await self._assign_instrument(msg.get("section_id"), msg.get("instrument"))
+            return
+        if t == P.STAGE_PLACE:
+            await self._place_section(msg.get("section_id"), msg.get("azimuth_deg"))
             return
         if t == P.SONG_LOAD:
             await self._load_song(conn, msg.get("name", "uploaded"), msg.get("data", ""))
             return
-        if t in (P.WAND_RECAL, P.STAGE_PLACE):
-            return  # aiming/placement wired in P5
 
         log.debug("unhandled message type %r", t)
 
@@ -237,9 +272,26 @@ class App:
             # Anchor beat 0 one second out so the first beat has clean lead time.
             self.engine.on_transport(cmd, server_time_ms() + 1000.0)
             self.scheduler.start()
+            st = self.engine.status()
+            n = len(self.session.engine_sections())
+            self.showlog.record("show.start", sections=n, song=st["song"], bpm=st["bpm"])
+            self.announcer.poke("show.start",
+                                f"The show just started: song '{st['song']}' at {st['bpm']} BPM "
+                                f"with {n} phone sections.")
+            if self._vibe_task is None or self._vibe_task.done():
+                self._vibe_task = asyncio.create_task(self._vibe_loop())
         elif cmd == "stop":
             self.session.playing = False
             self.engine.on_transport("stop", None)
+            if self._vibe_task is not None:
+                self._vibe_task.cancel()
+                self._vibe_task = None
+            self.showlog.record("show.stop")
+            self.showlog.write_manifest()
+            m = self.showlog.manifest()
+            self.announcer.poke("show.stop",
+                                f"The set just ended after {m['events']} logged moments. "
+                                f"Its fingerprint hash is {m['head_hash'][:12]}. Send the crowd off.")
         elif cmd == "allnotesoff":
             self.engine.on_transport("allnotesoff", None)
         elif cmd == "tempo":
@@ -257,6 +309,10 @@ class App:
             song, tracks = await asyncio.to_thread(load_midi_bytes, data, name)
             self.engine.load_song(song, tracks)
             log.info("song loaded: %s (%d bars, %d parts)", song.name, len(song.bars), len(tracks))
+            self.showlog.record("song.load", name=song.name, bars=len(song.bars), parts=len(tracks))
+            self.announcer.poke("song.load",
+                                f"New song dropped: '{song.name}', {len(song.bars)} bars, "
+                                f"{len(tracks)} parts, {song.bpm:.0f} BPM.")
             # Auto-assign instruments so each phone becomes one of the MIDI's parts.
             playable = [t for t in tracks if not t["is_drum"]]
             ready = [s for s in self.session.sections.values() if s.connected]
@@ -272,6 +328,87 @@ class App:
         except Exception as e:  # noqa: BLE001 - report parse failures to the uploader
             log.warning("midi load failed for %r: %s", name, e)
             await send_json(conn.ws, {"t": P.ERR, "code": "bad_midi", "msg": str(e)})
+
+    # --- wand feature surface (aiming, pads, proximity) ---
+    def _placements(self) -> dict[str, float]:
+        """Azimuth per ready section. Unplaced orchestras get an automatic
+        spread across -60..60 by join order, so aiming works out of the box."""
+        ready = [s for s in self.session.sections.values() if s.connected and s.ready]
+        if not ready:
+            return {}
+        if any(s.azimuth_deg for s in ready):
+            return {s.section_id: s.azimuth_deg for s in ready}
+        n = len(ready)
+        return {s.section_id: (0.0 if n == 1 else -60.0 + 120.0 * i / (n - 1))
+                for i, s in enumerate(ready)}
+
+    async def _update_aim(self, frames: list) -> None:
+        self.aimer.on_frames(frames)
+        aim = self.aimer.resolve(self._placements())
+        now = server_time_ms()
+        if aim != self._last_aim:
+            self._last_aim = aim
+            self.engine.on_aim(aim)
+            if aim:
+                self.showlog.record("wand.aim", section=aim)
+        elif now - self._last_state_ms < 150.0:
+            return
+        self._last_state_ms = now
+        await self.hub.broadcast({"t": P.WAND_STATE, "grabbed": self.wand.grabbing,
+                                  "aim_section": aim, "yaw_deg": round(self.aimer.yaw, 1)},
+                                 roles=("stage", "admin"))
+
+    async def _wand_touch(self, pad: int, state: str) -> None:
+        if state == "down" and 0 <= pad < len(PAD_CANDIDATES):
+            self.engine.set_forced(PAD_CANDIDATES[pad])
+            self.showlog.record("wand.touch", pad=pad, forced=PAD_CANDIDATES[pad])
+        elif state == "up":
+            self.engine.set_forced(None)
+        else:
+            return  # pads >= len(PAD_CANDIDATES) are reserved for hardware-side modes
+        await self._broadcast_roster()
+
+    async def _wand_range(self, mm: float) -> None:
+        if mm < 0:
+            return
+        # 600mm+ away = open; closing to 100mm sweeps the tension to full.
+        tension = max(0.0, min(1.0, (600.0 - mm) / 500.0))
+        now = server_time_ms()
+        if abs(tension - self._tension) < 0.03 or now - self._last_tension_ms < 100.0:
+            return
+        if round(tension * 4) != round(self._tension * 4):   # ledger at quarter steps only
+            self.showlog.record("wand.tension", value=round(tension, 2))
+        self._tension = tension
+        self._last_tension_ms = now
+        await self.hub.broadcast({"t": P.FX_TENSION, "value": round(tension, 3)},
+                                 roles=("section", "stage"))
+
+    async def _place_section(self, section_id: str, azimuth_deg) -> None:
+        section = self.session.sections.get(section_id)
+        if not section:
+            return
+        try:
+            section.azimuth_deg = float(azimuth_deg)
+        except (TypeError, ValueError):
+            return
+        self.engine.on_sections_changed(self.session.engine_sections())
+        await self._broadcast_roster()
+
+    async def _announce_line(self, text: str) -> None:
+        await self.hub.broadcast({"t": P.ANNOUNCE, "text": text}, roles=("stage", "admin"))
+
+    async def _vibe_loop(self) -> None:
+        """While the show runs, periodically hand the commentator a vibe digest."""
+        while True:
+            await asyncio.sleep(90.0)
+            if not self.session.playing:
+                continue
+            st = self.engine.status()
+            g = st.get("gesture") or {}
+            self.announcer.poke("vibe",
+                                f"Mid-set vibe check: '{st['song']}' at {st['bpm']} BPM, the "
+                                f"{st.get('decision_source')} brain last chose {st.get('last_choice')}, "
+                                f"gesture energy {g.get('energy', 0):.2f}.")
 
     async def _assign_instrument(self, section_id: str, instrument: str) -> None:
         section = self.session.sections.get(section_id)
@@ -295,9 +432,15 @@ class App:
         if conn.role == "section" and conn.section_id in self.session.sections:
             # Keep the slot (instrument/placement) for the grace period; a rejoin
             # with the same client_id rebinds it. For P1 we just mark it dropped.
-            self.session.sections[conn.section_id].connected = False
-            self.session.sections[conn.section_id].ready = False
+            section = self.session.sections[conn.section_id]
+            was_ready = section.ready
+            section.connected = False
+            section.ready = False
             self.engine.on_sections_changed(self.session.engine_sections())
+            if was_ready:
+                self.showlog.record("section.drop", section=conn.section_id)
+                self.announcer.poke("section.drop",
+                                    f"Section {conn.section_id} dropped off — the orchestra covers.")
         elif conn.role in P.WAND_ROLES and self._wand_client == conn.client_id:
             self.session.wand = WandSlot()
             self._wand_client = None

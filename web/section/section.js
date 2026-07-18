@@ -78,6 +78,7 @@ joinScreen.addEventListener("click", async () => {
     }
   });
   conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
+  conn.on(P.FX_TENSION, (m) => synth.setTension(m.value));
   conn.on(P.SECTION_CONFIG, (m) => {         // live instrument reassignment from the editor
     synth.setInstrument(m.instrument);
     el("sid").textContent = `${myId} · ${m.instrument}`;

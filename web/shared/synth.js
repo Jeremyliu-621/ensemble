@@ -47,7 +47,13 @@ export class Synth {
     await this.ctx.resume();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.22;          // headroom so stacked notes don't clip
-    this.master.connect(this.ctx.destination);
+    // Master tension filter: the wand's ToF proximity sweeps this closed for
+    // build-ups (fx.tension). Wide open (18kHz) = inaudible by default.
+    this.fx = this.ctx.createBiquadFilter();
+    this.fx.type = "lowpass";
+    this.fx.frequency.value = 18000;
+    this.master.connect(this.fx);
+    this.fx.connect(this.ctx.destination);
     // Silent one-sample buffer so iOS marks the context "running".
     const buf = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
     const src = this.ctx.createBufferSource();
@@ -101,6 +107,14 @@ export class Synth {
       const delay = ev.at - this.clock.serverNow();
       setTimeout(() => this.onPlay(ev, peak), Math.max(0, delay));
     }
+  }
+
+  // Proximity build-up: 0 = open, 1 = fully washed out (wand ToF -> fx.tension).
+  setTension(v) {
+    if (!this.fx) return;
+    const t = Math.max(0, Math.min(1, v || 0));
+    const f = 250 + 17750 * Math.pow(1 - t, 2);
+    this.fx.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.08);
   }
 
   panic() {
