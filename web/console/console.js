@@ -446,6 +446,17 @@ conn.onOpen((welcome) => {
     const qr = window.qrcode(0, "M"); qr.addData(join); qr.make();
     el("qr").innerHTML = qr.createSvgTag({ cellSize: 5, margin: 1, scalable: true });
   }
+  // Laptops don't scan QRs — show the URL, click to copy.
+  if (join) {
+    const link = el("joinlink");
+    link.textContent = join.replace(/^https?:\/\//, "");
+    link.onclick = async () => {
+      try { await navigator.clipboard.writeText(join); } catch { /* http non-localhost may deny */ }
+      link.textContent = "✓ copied";
+      link.classList.add("copied");
+      setTimeout(() => { link.textContent = join.replace(/^https?:\/\//, ""); link.classList.remove("copied"); }, 1400);
+    };
+  }
 });
 conn.onClose(() => { el("conndot").classList.remove("ok"); el("connlbl").textContent = "reconnecting"; });
 
