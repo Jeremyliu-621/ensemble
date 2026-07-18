@@ -31,3 +31,4 @@ Thumbs.db
 .vscode/
 .idea/
 songs/
+server/data/last_song.*
