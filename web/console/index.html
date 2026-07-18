@@ -307,7 +307,22 @@
     </div>
   </div>
 
+  <!-- if the console's JS ever dies, say so ON SCREEN instead of failing silent -->
+  <div id="jserr" style="display:none; position:fixed; left:12px; bottom:12px; z-index:999; max-width:70ch;
+    background:#4a1016; color:#ffd6d6; border:1px solid #d76a6a; border-radius:8px; padding:.6rem .8rem;
+    font:12px/1.5 ui-monospace,monospace; white-space:pre-wrap;"></div>
+  <script>
+    window.addEventListener("error", (e) => {
+      const b = document.getElementById("jserr"); b.style.display = "block";
+      b.textContent += `⚠ ${e.message}\n   ${(e.filename || "").split("/").slice(-1)}:${e.lineno}\n`;
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      const b = document.getElementById("jserr"); b.style.display = "block";
+      b.textContent += `⚠ (promise) ${e.reason}\n`;
+    });
+  </script>
   <script src="../vendor/qrcode.js"></script>
-  <script type="module" src="./console.js"></script>
+  <script type="module" src="./console.js"
+    onerror="document.getElementById('jserr').style.display='block';document.getElementById('jserr').textContent='⚠ console.js failed to load or parse';"></script>
 </body>
 </html>

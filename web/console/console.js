@@ -22,6 +22,11 @@ const params = new URLSearchParams(location.search);
 const session = params.get("s") || "lol1";
 const el = (id) => document.getElementById(id);
 
+// Boot beacon: if the header still says "connecting", this module never ran;
+// "js up — dialing" means we're alive and it's the WebSocket that's stuck.
+el("connlbl").textContent = "js up — dialing";
+console.log("[console] boot, ws target:", location.host);
+
 const SEMI = { C: 0, "C#": 1, D: 2, "D#": 3, E: 4, F: 5, "F#": 6, G: 7, "G#": 8, A: 9, "A#": 10, B: 11 };
 const noteToMidi = (n) => { const m = /^([A-G]#?)(-?\d+)$/.exec(n || ""); return m ? (parseInt(m[2], 10) + 1) * 12 + SEMI[m[1]] : 60; };
 const NICE = { lower_imitation: "Lower imitation", contrary_motion: "Contrary motion", sustained: "Sustained chord",
