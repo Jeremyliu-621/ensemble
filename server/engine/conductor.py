@@ -10,12 +10,16 @@ from __future__ import annotations
 import itertools
 import logging
 
+from config import MIN_LEAD_MS
 from engine.candidates import ART, GENERATORS, generate
 from engine.song import builtin_song
 from engine.theory import midi_to_name
 from engine_api import CancelSpec, GestureWindow, NoteEvent, SectionInfo
 from gestures.features import GestureFeatures, extract_features
 from ml import heuristic
+from ml.datalog import DecisionLog
+from ml.policy import RemoteModel, heuristic_decision
+from ml.schema import Decision, build_context
 from protocol import SECTION_ALL
 
 log = logging.getLogger("engine")
@@ -33,6 +37,10 @@ class Conductor:
         self._gesture: GestureFeatures | None = None
         self._last_choice: str | None = None
         self._forced: str | None = None                 # editor override; None = let the ranker choose
+        self._model = RemoteModel()                     # trained policy (WM_MODEL_URL); optional
+        self._decision: Decision | None = None          # its active answer, until the next gesture
+        self._last_source = "heuristic"
+        self._datalog = DecisionLog()
         self._sections: list[SectionInfo] = []
         self._cancels: list[CancelSpec] = []
         self._ids = itertools.count(1)
@@ -69,6 +77,7 @@ class Conductor:
             "bpm": round(self.bpm),
             "forced": self._forced or "auto",
             "last_choice": self._last_choice,
+            "decision_source": self._last_source,
             "candidates": list(GENERATORS),
             "gesture": self._gesture.as_dict() if self._gesture else None,
             "song": self.song.name,
@@ -80,7 +89,10 @@ class Conductor:
     # --- transport ---
     def on_transport(self, cmd: str, t0_ms: float | None) -> None:
         if cmd in ("start", "clicktest"):
+            if self._playing:                    # restart: silence the old timeline first
+                self._cancels.append(CancelSpec(allnotesoff=True))
             self._playing = True
+            self._reanchor = False               # start's clean anchor wins over a pending reanchor
             self._next_bar_idx = 0
             self._next_bar_start = t0_ms or 0.0
             log.info("transport start @%.0f  bar=%.0fms (%.0f BPM)",
@@ -96,6 +108,8 @@ class Conductor:
     def on_gesture(self, window: GestureWindow) -> None:
         self._gesture = extract_features(window)
         log.info("gesture -> %s", {k: round(v, 2) for k, v in self._gesture.as_dict().items()})
+        self._decision = None                    # new intent — the model must re-decide
+        self._model.request(self._context())
 
     def on_grab(self, kind: str, server_ms: float) -> None:
         pass  # grab edges could cut sustains; not needed for the slice
@@ -104,14 +118,16 @@ class Conductor:
         pass
 
     def on_feedback(self, value: int) -> None:
-        log.info("feedback %+d (ranker training wired in P5)", value)
+        self._datalog.feedback(value)
+        log.info("feedback %+d (logged as a training signal)", value)
 
     # --- event pull ---
     def get_events(self, now_ms: float, until_ms: float) -> list[NoteEvent]:
         if not self._playing:
             return []
         if self._reanchor:                       # a freshly loaded song starts here
-            self._next_bar_start = now_ms + 100.0
+            # Must clear MIN_LEAD_MS or the new song's downbeat gets dropped.
+            self._next_bar_start = now_ms + max(2 * MIN_LEAD_MS, 400.0)
             self._next_bar_idx = 0
             self._reanchor = False
         events: list[NoteEvent] = []
@@ -126,6 +142,35 @@ class Conductor:
         out, self._cancels = self._cancels, []
         return out
 
+    # --- decision policy ---
+    def _context(self, idx: int | None = None) -> dict:
+        bar = self.song.bar(self._next_bar_idx if idx is None else idx)
+        return build_context(key_root=self.song.key_root, bpm=self.bpm,
+                             chord_root=bar.chord_root, chord_minor=bar.chord_minor,
+                             last_choice=self._last_choice, gesture=self._gesture)
+
+    def _decide(self, idx: int, cands: dict) -> Decision:
+        """Editor override > active model answer > heuristic — always instantly
+        playable, so the network can only add intelligence, never stall a bar.
+        Every (context, decision) pair becomes a logged training row."""
+        ctx = self._context(idx)
+        if self._forced and self._forced in cands:
+            decision = Decision(candidate=self._forced,
+                                octave_shift=heuristic.octave_shift(self._gesture) // 12,
+                                source="forced")
+        else:
+            fresh = self._model.take()
+            if fresh is not None:
+                self._decision = fresh
+            if self._decision is not None and self._decision.candidate in cands:
+                decision = self._decision
+            else:
+                decision = heuristic_decision(self._gesture, self._last_choice)
+        self._last_choice = decision.candidate
+        self._last_source = decision.source
+        self._datalog.decision(bar=idx, song=self.song.name, context=ctx, decision=decision)
+        return decision
+
     # --- bar generation ---
     def _bar_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
         if self.song.parts:                      # a loaded MIDI: play its arrangement
@@ -134,14 +179,8 @@ class Conductor:
         prev = self.song.bar(idx - 1)
         cands = generate(bar, prev, self.song.key_root)
 
-        # Editor override wins; otherwise the ranker picks from the gesture.
-        if self._forced and self._forced in cands:
-            choice = self._forced
-        else:
-            scores = heuristic.rank(self._gesture, list(cands.keys()))
-            choice = heuristic.choose(scores, self._last_choice)
-        self._last_choice = choice
-        shift = heuristic.octave_shift(self._gesture)
+        decision = self._decide(idx, cands)
+        choice, shift = decision.candidate, decision.semitones()
 
         responder = cands[choice]
         art = ART.get(choice, "pluck")
@@ -171,7 +210,8 @@ class Conductor:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                      dur * self.s16_ms, midi, 0.9, "pluck"))
 
-        log.info("bar %d -> %s (%d notes, shift %+d, %d sections)", idx, choice, len(responder), shift, n)
+        log.info("bar %d -> %s [%s] (%d notes, shift %+d, %d sections)",
+                 idx, choice, decision.source, len(responder), shift, n)
         return events
 
     def _arrangement_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
@@ -194,12 +234,8 @@ class Conductor:
         # Gesture/editor layer: a candidate built from the lead, riding on top.
         bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
         cands = generate(bar, prev, self.song.key_root)
-        if self._forced and self._forced in cands:
-            choice = self._forced
-        else:
-            choice = heuristic.choose(heuristic.rank(self._gesture, list(cands.keys())), self._last_choice)
-        self._last_choice = choice
-        shift = heuristic.octave_shift(self._gesture)
+        decision = self._decide(idx, cands)
+        choice, shift = decision.candidate, decision.semitones()
         for (on, dur, midi, vel) in cands[choice]:
             events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
                                      dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,

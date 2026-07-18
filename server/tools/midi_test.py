@@ -6,9 +6,11 @@ Run:  python server/tools/midi_test.py    (from repo root)
 from __future__ import annotations
 
 import io
+import os
 import pathlib
 import sys
 
+os.environ["WM_DECISION_LOG"] = "0"          # test decisions must not pollute the harvest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8")
 

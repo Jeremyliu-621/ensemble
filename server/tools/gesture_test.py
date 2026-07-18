@@ -13,9 +13,11 @@ Run:  python server/tools/gesture_test.py     (from repo root)
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
+os.environ["WM_DECISION_LOG"] = "0"          # test decisions must not pollute the harvest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))  # server/ on path
 sys.stdout.reconfigure(encoding="utf-8")
 

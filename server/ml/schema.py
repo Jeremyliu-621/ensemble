@@ -1,0 +1,80 @@
+"""The decision contract between the music engine and any trained policy model.
+
+A decision is the tiny JSON object a policy emits per gesture:
+
+    {"candidate": "rhythmic_dense", "octave_shift": 0}
+
+`candidate` picks which accompaniment line the coming bars play; `octave_shift`
+moves that line by whole octaves. DECISION_SCHEMA is the single source of
+truth: the server parses replies against it, the dataset builder validates
+training rows with it, and the GRPO config embeds it as `structured_outputs`
+so the trained model cannot emit off-format tokens.
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from engine.candidates import GENERATORS
+
+CANDIDATES = list(GENERATORS)
+
+DECISION_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "candidate": {"type": "string", "enum": CANDIDATES},
+        "octave_shift": {"type": "integer", "enum": [-1, 0, 1]},
+    },
+    "required": ["candidate", "octave_shift"],
+    "additionalProperties": False,
+}
+
+INSTRUCTION = (
+    "You are the accompaniment brain of a gesture-conducted orchestra. Given the "
+    "musical context and the conductor's gesture, reply with ONLY a JSON object "
+    'like {"candidate": "sustained", "octave_shift": 0}. candidate is one of: '
+    + ", ".join(CANDIDATES) + ". octave_shift is -1, 0 or 1 (whole octaves)."
+)
+
+
+@dataclass
+class Decision:
+    candidate: str
+    octave_shift: int          # whole octaves, -1..1
+    source: str = "model"      # "heuristic" | "model" | "forced"
+
+    def semitones(self) -> int:
+        return self.octave_shift * 12
+
+
+def build_context(*, key_root: int, bpm: float, chord_root: int, chord_minor: bool,
+                  last_choice: str | None, gesture) -> dict:
+    """The compact model input. Floats are rounded so live prompts tokenise the
+    same way the logged/training ones do."""
+    g = {k: round(v, 2) for k, v in gesture.as_dict().items()} if gesture else None
+    return {
+        "key": key_root,
+        "bpm": round(bpm),
+        "chord": {"root": chord_root, "minor": chord_minor},
+        "prev": last_choice,
+        "gesture": g,
+    }
+
+
+def prompt_for(context: dict) -> str:
+    return INSTRUCTION + "\nContext: " + json.dumps(context, separators=(",", ":"))
+
+
+def parse_decision(text: str, source: str = "model") -> Decision | None:
+    """Parse a policy reply. Lenient on extra keys (an SFT-only model may chat),
+    strict on values — any deviation returns None and the heuristic covers."""
+    try:
+        obj = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(obj, dict):
+        return None
+    cand, shift = obj.get("candidate"), obj.get("octave_shift")
+    if cand not in CANDIDATES or shift not in (-1, 0, 1):
+        return None
+    return Decision(candidate=cand, octave_shift=int(shift), source=source)

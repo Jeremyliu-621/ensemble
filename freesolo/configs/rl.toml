@@ -1,0 +1,25 @@
+# Freesolo Flash — stage 2: GRPO polish on top of the SFT adapter.
+#
+# Reward = environment.py:score_response (format + musical consistency).
+# `structured_outputs` embeds the decision schema (mirror of
+# server/ml/schema.py DECISION_SCHEMA) so the model cannot emit off-format
+# tokens during sampling — and it becomes the adapter's serving default.
+#
+# Quote first:   flash train freesolo/configs/rl.toml --cost
+# Start from the SFT run — check `flash env setup` / the docs for the exact
+# key name that chains runs (and reconcile all key names with the scaffold).
+
+model = "qwen3.5-2b"
+algorithm = "grpo"
+
+[train]
+max_steps = 300
+group_size = 8
+temperature = 0.7
+kl_penalty_coef = 0.01
+lora_rank = 32
+lora_alpha = 64
+learning_rate = 5e-6
+batch_size = 4
+max_context_tokens = 512
+structured_outputs = '{"type":"object","properties":{"candidate":{"type":"string","enum":["lower_imitation","contrary_motion","sustained","delayed","rhythmic_dense","rest"]},"octave_shift":{"type":"integer","enum":[-1,0,1]}},"required":["candidate","octave_shift"],"additionalProperties":false}'

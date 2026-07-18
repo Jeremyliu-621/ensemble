@@ -31,3 +31,16 @@ METRONOME_BEATS_PER_BAR = 4
 
 # --- Session lifecycle ---
 DISCONNECT_GRACE_S = 60.0  # keep a section's slot (instrument/placement) this long after it drops
+
+# --- Data / logs ---
+DATA_DIR = SERVER_DIR / "data"
+DECISIONS_DIR = DATA_DIR / "decisions"   # per-run JSONL decision logs (training harvest)
+DECISION_LOG = os.environ.get("WM_DECISION_LOG", "1") != "0"
+
+# --- Decision model (optional; unset = heuristic ranker only) ---
+# Any OpenAI-compatible serving base works, e.g. a Freesolo deploy:
+#   WM_MODEL_URL=https://<serving-host>/v1  WM_MODEL_NAME=<run-id>  WM_MODEL_KEY=<key>
+MODEL_URL = os.environ.get("WM_MODEL_URL", "")
+MODEL_NAME = os.environ.get("WM_MODEL_NAME", "")
+MODEL_KEY = os.environ.get("WM_MODEL_KEY", "")
+MODEL_TIMEOUT_MS = float(os.environ.get("WM_MODEL_TIMEOUT_MS", "800"))  # then the heuristic covers

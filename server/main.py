@@ -64,6 +64,8 @@ class App:
         self.wand = WandRouter(self.engine)
         self.scheduler = Scheduler(self.engine, self.hub)
         self.lan_ip = detect_lan_ip()
+        self._wand_client: str | None = None    # who owns the wand slot
+        self._last_roster_ms = 0.0              # throttle for health-ping-triggered rosters
 
     # --- static + WS routing ---
     def process_request(self, connection: ServerConnection, request):
@@ -116,6 +118,8 @@ class App:
         elif role in P.WAND_ROLES:
             variant = P.WAND_VARIANT[role]
             self.session.wand = WandSlot(connected=True, variant=variant)
+            self._wand_client = client_id
+            self.wand.reset()                   # a fresh wand must not inherit a stale grab
             log.info("wand connected (variant=%s)", variant)
         elif role in ("stage", "admin"):
             # Phone wand over the LAN (HTTPS on :8443 — DeviceMotion needs a secure
@@ -156,7 +160,14 @@ class App:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            await self._dispatch(conn, msg)
+            if not isinstance(msg, dict):
+                continue
+            try:
+                await self._dispatch(conn, msg)
+            except websockets.ConnectionClosed:
+                raise
+            except Exception:  # noqa: BLE001 - one malformed frame must not drop the client
+                log.exception("dispatch failed for %r from %s", msg.get("t"), conn.client_id[:8])
 
     async def _dispatch(self, conn: ClientConn, msg: dict) -> None:
         t = msg.get("t")
@@ -171,7 +182,10 @@ class App:
         if t == P.CLOCK_REPORT:
             conn.theta = msg.get("theta")
             conn.rtt = msg.get("rtt")
-            await self._broadcast_roster()
+            # Health pings arrive every 2s per device; don't fan out a full
+            # roster (with piano-roll tracks) for each one on venue wifi.
+            if server_time_ms() - self._last_roster_ms > 1000.0:
+                await self._broadcast_roster()
             return
 
         if t == P.SECTION_READY:
@@ -179,6 +193,12 @@ class App:
                 self.session.sections[conn.section_id].ready = True
                 self.engine.on_sections_changed(self.session.engine_sections())
                 await self._broadcast_roster()
+            return
+
+        # Show control: only the stage/editor may drive the show — the join QR
+        # is public, so audience phones must not be able to stop or hijack it.
+        if t in (P.ADMIN_CMD, P.SONG_LOAD, P.STAGE_ASSIGN) and conn.role not in ("stage", "admin"):
+            await send_json(conn.ws, {"t": P.ERR, "code": "forbidden", "msg": "controller role required"})
             return
 
         if t == P.ADMIN_CMD:
@@ -232,7 +252,9 @@ class App:
         from engine.midi_load import load_midi_bytes
         try:
             data = base64.b64decode(b64)
-            song, tracks = load_midi_bytes(data, name)
+            # Parse off the event loop: a big file must not stall the scheduler
+            # tick or clock pongs mid-performance.
+            song, tracks = await asyncio.to_thread(load_midi_bytes, data, name)
             self.engine.load_song(song, tracks)
             log.info("song loaded: %s (%d bars, %d parts)", song.name, len(song.bars), len(tracks))
             # Auto-assign instruments so each phone becomes one of the MIDI's parts.
@@ -264,6 +286,11 @@ class App:
         await self._broadcast_roster()
 
     async def _on_disconnect(self, conn: ClientConn) -> None:
+        # A reconnect may already have superseded this socket (the hub keys on
+        # client_id); cleaning up now would evict the LIVE connection and mute
+        # its section for good.
+        if self.hub.get(conn.client_id) is not conn:
+            return
         self.hub.unregister(conn.client_id)
         if conn.role == "section" and conn.section_id in self.session.sections:
             # Keep the slot (instrument/placement) for the grace period; a rejoin
@@ -271,11 +298,14 @@ class App:
             self.session.sections[conn.section_id].connected = False
             self.session.sections[conn.section_id].ready = False
             self.engine.on_sections_changed(self.session.engine_sections())
-        elif conn.role in ("wand", "wand-sim"):
+        elif conn.role in P.WAND_ROLES and self._wand_client == conn.client_id:
             self.session.wand = WandSlot()
+            self._wand_client = None
+            self.wand.reset()                   # never leave a grab open across a drop
         await self._broadcast_roster()
 
     async def _broadcast_roster(self) -> None:
+        self._last_roster_ms = server_time_ms()
         payload = {"t": P.ROSTER, **self.session.roster_payload()}
         # Enrich each section entry with its connected client's clock estimate,
         # so the stage can show per-section offset and compute the spread.
@@ -310,11 +340,15 @@ async def main() -> None:
 
     # host=None binds all interfaces (IPv4 + IPv6), so both localhost (::1 on
     # Windows) and the LAN IPv4 reach the server.
-    async with serve(app.handler, None, HTTP_PORT, process_request=app.process_request):
+    # max_size: default 1MiB closes the socket on a big base64 MIDI upload (1009).
+    max_frame = 16 * 2**20
+    async with serve(app.handler, None, HTTP_PORT, process_request=app.process_request,
+                     max_size=max_frame):
         log.info("HTTP/ws  listening on :%d", HTTP_PORT)
         if ssl_ctx is not None:
             async with serve(app.handler, None, HTTPS_PORT,
-                             process_request=app.process_request, ssl=ssl_ctx):
+                             process_request=app.process_request, ssl=ssl_ctx,
+                             max_size=max_frame):
                 log.info("HTTPS/wss listening on :%d  (wand-sim: https://%s:%d/wandsim/)",
                          HTTPS_PORT, app.lan_ip, HTTPS_PORT)
                 await asyncio.Future()

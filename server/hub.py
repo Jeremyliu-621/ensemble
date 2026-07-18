@@ -37,8 +37,20 @@ class Hub:
         self._by_id: dict[str, ClientConn] = {}
 
     def register(self, conn: ClientConn) -> None:
+        old = self._by_id.get(conn.client_id)
         self._by_id[conn.client_id] = conn
+        if old is not None and old.ws is not conn.ws:
+            # A reconnect superseded an open socket (wifi blip): close the old
+            # one now so its handler exits instead of lingering to ping-timeout.
+            asyncio.ensure_future(self._close_quietly(old.ws))
         log.info("register %s role=%s (total=%d)", conn.client_id[:8], conn.role, len(self._by_id))
+
+    @staticmethod
+    async def _close_quietly(ws: ServerConnection) -> None:
+        try:
+            await ws.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     def unregister(self, client_id: str) -> None:
         conn = self._by_id.pop(client_id, None)

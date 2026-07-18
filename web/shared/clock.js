@@ -66,10 +66,26 @@ export class Clock {
   }
 
   start() {
+    // Idempotent: reconnects call start() again; never stack ping timers.
+    this._timers.forEach(clearTimeout);
+    this._timers = [];
+    if (this._periodic) clearInterval(this._periodic);
     for (let i = 0; i < BURST_COUNT; i++) {
       this._timers.push(setTimeout(() => this._ping(), i * BURST_SPACING_MS));
     }
     this._periodic = setInterval(() => this._ping(), PERIODIC_MS);
+  }
+
+  // A welcome's server_time exposes a server restart: old fit points then
+  // belong to a dead epoch and would poison the regression for MAX_AGE_MS.
+  checkEpoch(serverTimeMs) {
+    if (this._a === null || typeof serverTimeMs !== "number") return;
+    if (Math.abs(serverTimeMs - this.serverNow()) > 1000) {
+      this._points = [];
+      this._pending.clear();
+      this._a = serverTimeMs - performance.now();  // coarse anchor until pings refine it
+      this._b = 1;
+    }
   }
 
   stop() {
@@ -79,6 +95,9 @@ export class Clock {
   }
 
   _ping() {
+    for (const [id, t0] of this._pending) {       // prune pings lost to a reconnect
+      if (performance.now() - t0 > 10_000) this._pending.delete(id);
+    }
     const id = this._nextId++;
     const t0 = performance.now();
     this._pending.set(id, t0);

@@ -69,6 +69,7 @@ conn.onOpen((welcome) => {
   el("status").textContent = `connected · session ${welcome.config.session}`;
   if (welcome.config.wand_url) renderQR(welcome.config.wand_url);
   if (welcome.config.cv_url) el("cvlink").href = welcome.config.cv_url;
+  clock.checkEpoch(welcome.server_time);   // a server restart mustn't poison the fit
 });
 conn.onClose(() => { el("status").textContent = "reconnecting…"; });
 

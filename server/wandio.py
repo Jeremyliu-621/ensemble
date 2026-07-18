@@ -11,7 +11,8 @@ from engine_api import GestureWindow, MusicEngine
 
 log = logging.getLogger("wand")
 
-MIN_FRAMES = 3  # windows shorter than this are dropped as noise
+MIN_FRAMES = 3       # windows shorter than this are dropped as noise
+MAX_FRAMES = 20_000  # a grab left open by a dropped wand stops growing here (~5 min @ 60Hz)
 
 
 class WandRouter:
@@ -33,8 +34,14 @@ class WandRouter:
             return
         if self._modality is None:
             self._modality = modality
-        if modality == self._modality:
+        if modality == self._modality and len(self._frames) < MAX_FRAMES:
             self._frames.extend(frames)
+
+    def reset(self) -> None:
+        """Forget any in-progress grab (the wand disconnected or was replaced)."""
+        self._grabbing = False
+        self._modality = None
+        self._frames = []
 
     def on_grab(self, kind: str, server_ms: float) -> None:
         if kind == "start":

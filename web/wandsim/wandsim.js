@@ -44,8 +44,10 @@ function onMotion(e) {
   const acc = e.accelerationIncludingGravity || { x: 0, y: 0, z: 0 };
   const rot = e.rotationRate || { alpha: 0, beta: 0, gamma: 0 };
   const tw = performance.now();
-  imuBuf.push(toFrame(tw, acc, rot));
-  if (imuBuf.length >= IMU_BATCH) flushImu();
+  if (grabbed) {              // server only reads frames inside a grab; save the wifi
+    imuBuf.push(toFrame(tw, acc, rot));
+    if (imuBuf.length >= IMU_BATCH) flushImu();
+  }
 
   // Feedback UI: gravity-inclusive magnitude and a tilt dot.
   lastAccel = Math.hypot(acc.x || 0, acc.y || 0, acc.z || 0);

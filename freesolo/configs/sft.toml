@@ -1,0 +1,24 @@
+# Freesolo Flash — stage 1: SFT imitation of the heuristic + your play sessions.
+#
+# Always quote before submitting:   flash train freesolo/configs/sft.toml --cost
+# Data comes from:                  python server/tools/build_dataset.py
+#
+# NOTE: `structured_outputs` is NOT valid for SFT (submit is rejected because
+# SFT never samples) — it lives in rl.toml only. At serving time the server
+# still passes response_format, so even an SFT-only adapter is format-checked.
+#
+# Model ids: check the current catalog (freesolo.co/docs/reference/models).
+# 0.8b trains in minutes and is fine for this 2-field decision; 4b if you want
+# headroom. Reconcile key names with the configs `flash env setup` generates.
+
+model = "qwen3.5-2b"
+algorithm = "sft"
+
+[train]
+epochs = 3
+max_examples = 20000
+lora_rank = 32
+lora_alpha = 64
+learning_rate = 1e-4
+batch_size = 8
+max_context_tokens = 512

@@ -26,6 +26,7 @@ const HOUSE = ["violin", "cello", "flute", "harp", "drums"];
 let conn = null, clock = null, synth = null;
 let started = false;
 let readySections = 0;
+let readyIds = new Set();            // sections currently connected+ready
 let performers = [];                 // [{id, instrument, connected, node}]
 const seen = new Set();              // sched.notes ids already handled (dedupe)
 const lastPulse = new Map();         // performer id -> last pulse ms (throttle)
@@ -189,7 +190,8 @@ function visualize(ev) {
 
 // --- roster / QR ------------------------------------------------------------
 function renderRoster(m) {
-  readySections = m.sections.filter((s) => s.connected && s.ready).length;
+  readyIds = new Set(m.sections.filter((s) => s.connected && s.ready).map((s) => s.id));
+  readySections = readyIds.size;
   const w = m.wand || {};
   el("wanddot").classList.toggle("ok", !!w.connected);
   el("wandstate").textContent = w.connected ? `connected (${w.variant})` : "none";
@@ -226,9 +228,13 @@ conn.on(P.ROSTER, renderRoster);
 conn.on(P.SCHED_NOTES, (m) => {
   for (const e of m.events) {
     visualize(e);                                        // always animate
-    if (started && readySections === 0 && e.section === P.SECTION_ALL) {
-      synth.schedule(e);                                 // laptop is the orchestra
-    }
+    if (!started) continue;
+    // Laptop is the orchestra when no phone is ready — and it also covers any
+    // event targeted at a section that dropped mid-bar, so the room never goes
+    // silent waiting for the conductor to re-target.
+    const covers = e.section === P.SECTION_ALL ? readySections === 0
+                                               : !readyIds.has(e.section);
+    if (covers) synth.schedule(e);
   }
 });
 conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
@@ -236,6 +242,7 @@ conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
 conn.onOpen((welcome) => {
   el("status").textContent = `session ${welcome.config.session}`;
   renderQR(welcome.config.wand_url || welcome.config.join_url);
+  clock.checkEpoch(welcome.server_time);   // a server restart mustn't poison the fit
 });
 conn.onClose(() => { el("status").textContent = "reconnecting…"; });
 
@@ -249,8 +256,14 @@ el("splash").addEventListener("click", async () => {
   } catch (e) { console.warn("[stagepix] audio unlock failed", e); }
   clock.start();
   started = true;
-  conn.send({ t: P.ADMIN_CMD, cmd: "start" });
+  sendStart();
 });
+// A fast splash click can beat the ws handshake; retry until we're welcomed
+// (Conn.send silently drops frames on a socket that isn't open yet).
+function sendStart() {
+  if (conn.welcome) conn.send({ t: P.ADMIN_CMD, cmd: "start" });
+  else setTimeout(sendStart, 150);
+}
 el("start2").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "start" }));
 el("stop").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "stop" }));
 el("panic").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "allnotesoff" }));

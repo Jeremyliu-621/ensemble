@@ -1,8 +1,9 @@
 // Control room. The live stage runs in the centre iframe (it plays the audio and
 // shows the orchestra); this page is the control surface around it — transport,
 // tempo, accompaniment override, MIDI drop + piano-roll, and instrument
-// assignment. It holds its own ws connection (role stage) for roster/engine
-// status and to send commands; it makes no sound of its own.
+// assignment. It holds its own ws connection (role admin — NOT stage, so it
+// never shares a client_id with the stage tab and evicts it from the hub) for
+// roster/engine status and to send commands; it makes no sound of its own.
 
 import { Conn } from "../shared/ws.js";
 import * as P from "../shared/protocol.js";
@@ -22,7 +23,7 @@ let forced = "auto";
 // Embed the live stage.
 el("stageframe").src = `../stagepix/?s=${encodeURIComponent(session)}`;
 
-const conn = new Conn({ role: "stage", session });
+const conn = new Conn({ role: "admin", session });
 
 // --- candidate override buttons (built once) ---
 function renderCandidates(list) {

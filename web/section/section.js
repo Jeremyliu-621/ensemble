@@ -88,6 +88,7 @@ joinScreen.addEventListener("click", async () => {
     synth.setInstrument(welcome.config.instrument);
     el("sid").textContent = `${myId} · ${welcome.config.instrument}`;
     el("dot").classList.add("ok");
+    clock.checkEpoch(welcome.server_time);
     clock.start();
     conn.send({ t: P.SECTION_READY });
   });
