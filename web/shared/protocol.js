@@ -24,6 +24,7 @@ export const SONG_EDIT = "song.edit";   // editor-authored notes -> replaces/upd
 export const SONG_HUM = "song.hum";       // {frames: [[t_ms, midi_float, rms], ...]}
 export const SONG_FILE = "song.file";     // {name} load songs/<name>.mid server-side
 export const CLOCK_REPORT = "clock.report";
+export const CV_STATE = "cv.state";           // {gesture|null, mode, confidence}
 
 // Server -> Client
 export const WELCOME = "welcome";
@@ -33,7 +34,8 @@ export const SCHED_NOTES = "sched.notes";
 export const SCHED_CANCEL = "sched.cancel";
 export const ROSTER = "roster";
 export const ENGINE_STATE = "engine.state";   // live accompaniment/gesture updates
-export const WAND_STATE = "wand.state";
+export const WAND_STATE = "wand.state";     // optional imu stream-health diagnostics for stage/admin
+export const WAND_CMD = "wand.cmd";       // server -> wand: reflect show state {playing, mode, aim, seq}
 export const ANNOUNCE = "announce";       // {text, audio_b64?, mime?}
 export const FX_TENSION = "fx.tension";   // {value: 0..1}
 export const FX_EXPR = "fx.expr";         // {section, semis, gain}

@@ -4,6 +4,7 @@ import test from "node:test";
 import { modeGestureFromFingerState } from "../cv/gestures.js";
 import { pickLeftHand } from "../cv/handedness.js";
 import { GestureRouter } from "../midi/commands.js";
+import { ServerEmitter } from "../net/emit.js";
 
 const fingers = (overrides = {}) => ({
   thumb: false,
@@ -110,4 +111,34 @@ test("pinch keeps continuous scrubbing and resumes prior playback", () => {
     "play",
     ["action", "scrub end"],
   ]);
+});
+
+test("CV state is sent only when the debounced gesture or mode changes", () => {
+  const sent = [];
+  const emitter = new ServerEmitter({ send(message) { sent.push(message); } });
+
+  emitter.state(null, "NONE", 0);
+  emitter.state(null, "NONE", 0.4); // confidence-only changes do not spam
+  emitter.state("PALM", "NONE", 0.92);
+  emitter.state("PALM", "NONE", 0.95);
+  emitter.state("TWO_FINGERS", "DETERMINISTIC", 1.5); // confidence is clamped
+  emitter.state(null, "DETERMINISTIC", Number.NaN);
+
+  assert.deepEqual(sent, [
+    { t: "cv.state", gesture: null, mode: "NONE", confidence: 0 },
+    { t: "cv.state", gesture: "PALM", mode: "NONE", confidence: 0.92 },
+    { t: "cv.state", gesture: "TWO_FINGERS", mode: "DETERMINISTIC", confidence: 1 },
+    { t: "cv.state", gesture: null, mode: "DETERMINISTIC", confidence: 0 },
+  ]);
+});
+
+test("CV state can be re-synced after reconnect", () => {
+  const sent = [];
+  const emitter = new ServerEmitter({ send(message) { sent.push(message); } });
+  emitter.state("THREE_FINGERS", "AI", 0.88);
+  emitter.syncState();
+
+  assert.deepEqual(sent[1], {
+    t: "cv.state", gesture: "THREE_FINGERS", mode: "AI", confidence: 0.88,
+  });
 });

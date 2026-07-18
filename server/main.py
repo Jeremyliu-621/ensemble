@@ -16,6 +16,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import os
 import socket
 import ssl
@@ -44,6 +45,8 @@ from config import (
 from engine.candidates import GENERATORS
 from engine.conductor import Conductor
 from hub import ClientConn, Hub, send_json
+from imu_telemetry import ImuTelemetry
+from network_address import address_score, format_url_host
 from recording.recorder import GestureRecorder
 from scheduler import Scheduler
 from session import Section, SessionState, WandSlot
@@ -58,28 +61,8 @@ log = logging.getLogger("main")
 
 
 def _ip_score(ip: str) -> int:
-    """Rank an IPv4 by how likely it is the real Wi-Fi/LAN address a phone on the
-    same network can reach. Home Wi-Fi (192.168) beats corporate (10), both beat
-    the Docker/WSL bridges (172.17/18) and Tailscale/CGNAT (100.64/10)."""
-    p = ip.split(".")
-    if len(p) != 4 or not all(x.isdigit() for x in p):
-        return -100
-    a, b = int(p[0]), int(p[1])
-    if ip.startswith("169.254."):     # link-local (no DHCP lease) — dead
-        return -60
-    if ip.startswith("127."):
-        return -55
-    if a == 172 and b in (17, 18):    # Docker / WSL bridge — never LAN-reachable
-        return -50
-    if a == 192 and b == 168:
-        return 100
-    if a == 10:
-        return 80
-    if a == 172 and 16 <= b <= 31:
-        return 60
-    if a == 100 and 64 <= b <= 127:   # CGNAT/hotspot/Tailscale — often the real Wi-Fi
-        return 40                     # ...so prefer it over Docker, below real LANs
-    return 20                         # a public/other IP: usable
+    """Rank an address by how likely it is reachable by LAN peers."""
+    return address_score(ip)
 
 
 def detect_lan_ip() -> str:
@@ -118,11 +101,13 @@ class App:
         self.aimer = WandAimer()
         self.showlog = ShowLog(DEFAULT_SESSION)
         self.announcer = Announcer(self._announce_line)
+        self.imu_telemetry = ImuTelemetry()
         self.lan_ip = detect_lan_ip()
         self._wand_client: str | None = None    # who owns the wand slot
         self._last_roster_ms = 0.0              # throttle for health-ping-triggered rosters
         self._last_aim: str | None = None
         self._last_state_ms = 0.0               # wand.state broadcast throttle
+        self._wand_cmd_seq = 0                  # wand.cmd downlink counter
         self._tension = 0.0
         self._last_tension_ms = 0.0
         self._last_expr = (0, 1.0)              # deterministic-mode (semis, gain) throttle
@@ -276,6 +261,8 @@ class App:
             variant = P.WAND_VARIANT[role]
             self.session.wand = WandSlot(connected=True, variant=variant)
             self._wand_client = client_id
+            self.imu_telemetry.reset()           # never mix diagnostics across wand owners
+            self._last_state_ms = 0.0
             self.wand.reset()                   # a fresh wand must not inherit a stale grab
             self.showlog.record("wand.connect", variant=variant)
             self.announcer.poke("wand.connect", f"The conductor's wand just came alive ({variant}).")
@@ -286,7 +273,7 @@ class App:
             # needed for audio). `wand_url` is the key the console QR reads.
             # (To re-enable the phone wand later, point this at
             # https://.../wandsim/ on :8443 — that page still exists.)
-            http_base = f"http://{self.lan_ip}:{HTTP_PORT}"
+            http_base = f"http://{format_url_host(self.lan_ip)}:{HTTP_PORT}"
             config["wand_url"] = f"{http_base}/section/?s={self.session.name}"
             config["join_url"] = f"{http_base}/section/?s={self.session.name}"
             config["cv_url"] = f"{http_base}/cvwand/"
@@ -304,6 +291,8 @@ class App:
         # first hello (not just from SECTION_READY) — same single path as every
         # other roster mutation.
         await self._sections_changed()
+        if role in P.WAND_ROLES:
+            await self._notify_wand()           # sync the board to current state on connect
         return conn
 
     def _bind_section(self, conn: ClientConn) -> Section:
@@ -362,6 +351,40 @@ class App:
                 await self._broadcast_roster()
             return
 
+        if t == P.CV_STATE:
+            if conn.role != "admin":
+                await send_json(conn.ws, {"t": P.ERR, "code": "forbidden",
+                                          "msg": "admin role required for cv.state"})
+                return
+            gesture = msg.get("gesture")
+            mode = msg.get("mode")
+            confidence = msg.get("confidence", 0)
+            valid_confidence = (
+                isinstance(confidence, (int, float))
+                and not isinstance(confidence, bool)
+                and math.isfinite(confidence)
+                and 0 <= confidence <= 1
+            )
+            if (gesture not in (None, *P.CV_GESTURES)
+                    or mode not in P.CV_MODES
+                    or not valid_confidence):
+                await send_json(conn.ws, {"t": P.ERR, "code": "bad_cv_state",
+                                          "msg": "invalid CV gesture, mode, or confidence"})
+                return
+
+            signature = (gesture, mode)
+            previous = conn.extra.get("cv_state_signature")
+            conn.extra["cv_state_signature"] = signature
+            conn.extra["cv_state"] = {
+                "gesture": gesture,
+                "mode": mode,
+                "confidence": float(confidence),
+            }
+            if signature != previous:
+                log.info("cv state client=%s gesture=%s mode=%s confidence=%.0f%%",
+                         conn.client_id[:8], gesture or "NONE", mode, float(confidence) * 100)
+            return
+
         if t == P.SECTION_READY:
             if conn.section_id and conn.section_id in self.session.sections:
                 section = self.session.sections[conn.section_id]
@@ -404,7 +427,9 @@ class App:
         # Wand input -> router (buffers frames per grab, hands the engine a
         # complete gesture window on release). IMU frames also feed aiming.
         if t == P.WAND_IMU:
-            frames = msg.get("frames", [])
+            frames = self.imu_telemetry.ingest(
+                msg.get("seq"), msg.get("frames"), server_time_ms(),
+            )
             self.wand.on_imu(frames)
             await self._update_aim(frames)
             return
@@ -434,6 +459,7 @@ class App:
                 self.showlog.record("wand.mode", mode=mode, param=self.session.wand.det_param)
                 log.info("wand mode -> %s (%s)", mode, self.session.wand.det_param)
                 await self._broadcast_roster()
+                await self._notify_wand()        # mode change reaches the board
             return
         if t == P.WAND_FEEDBACK:
             self.engine.on_feedback(int(msg.get("value", 0)))
@@ -532,6 +558,7 @@ class App:
             else:
                 self.recorder.stop()
         await self._broadcast_roster()
+        await self._notify_wand()               # pause/play reaches the board's LED
 
     async def _sync_instruments_to_song(self) -> None:
         """After ANY song change (MIDI drop or live edit): re-align phones to the
@@ -666,6 +693,21 @@ class App:
         await self.hub.broadcast({"t": P.FX_EXPR, "section": aim or P.SECTION_ALL,
                                   "semis": semis, "gain": gain}, roles=("section", "stage"))
 
+    async def _notify_wand(self) -> None:
+        """Reflect show state (pause/play, ai/det mode, selected phone) back to
+        the hardware wand so the board can drive its LED/haptics. No-op unless a
+        wand owns the slot; hub.send_to guards a dead socket."""
+        if self._wand_client is None:
+            return
+        self._wand_cmd_seq += 1
+        await self.hub.send_to(self._wand_client, {
+            "t": P.WAND_CMD,
+            "playing": self.session.playing,
+            "mode": self.session.wand.mode,
+            "aim": self._last_aim,
+            "seq": self._wand_cmd_seq,
+        })
+
     async def _update_aim(self, frames: list) -> None:
         self.aimer.on_frames(frames)
         aim = self.aimer.resolve(self._placements())
@@ -677,11 +719,13 @@ class App:
             self.engine.on_aim(aim)
             if aim:
                 self.showlog.record("wand.aim", section=aim)
+            await self._notify_wand()            # selected-phone change reaches the board
         elif now - self._last_state_ms < 150.0:
             return
         self._last_state_ms = now
         await self.hub.broadcast({"t": P.WAND_STATE, "grabbed": self.wand.grabbing,
-                                  "aim_section": aim, "yaw_deg": round(self.aimer.yaw, 1)},
+                                  "aim_section": aim, "yaw_deg": round(self.aimer.yaw, 1),
+                                  "imu": self.imu_telemetry.snapshot()},
                                  roles=("stage", "admin"))
 
     async def _wand_touch(self, pad: int, state: str) -> None:
@@ -861,14 +905,15 @@ async def main() -> None:
     if _ip_score(app.lan_ip) <= 0:
         log.warning("  ^ that looks like a virtual/VPN interface (Docker/WSL/Tailscale), which")
         log.warning("    phones on your Wi-Fi CANNOT reach. Connect this machine to the same")
-        log.warning("    Wi-Fi as the phones, or start with:  WM_LAN_IP=192.168.x.x python server/main.py")
+        log.warning("    Wi-Fi as the phones, or start with:  WM_LAN_IP=<reachable-address> python server/main.py")
     log.info("open on this laptop:  http://localhost:%d/", HTTP_PORT)
-    log.info("stage/admin:  http://%s:%d/stage/?admin=1", app.lan_ip, HTTP_PORT)
-    log.info("section join: http://%s:%d/section/?s=%s", app.lan_ip, HTTP_PORT, DEFAULT_SESSION)
+    url_host = format_url_host(app.lan_ip)
+    log.info("stage/admin:  http://%s:%d/stage/?admin=1", url_host, HTTP_PORT)
+    log.info("section join: http://%s:%d/section/?s=%s", url_host, HTTP_PORT, DEFAULT_SESSION)
     asyncio.create_task(app.prune_loop())
 
     # host=None binds all interfaces (IPv4 + IPv6), so both localhost (::1 on
-    # Windows) and the LAN IPv4 reach the server.
+    # Windows) and LAN addresses from either family reach the server.
     # max_size: default 1MiB closes the socket on a big base64 MIDI upload (1009).
     max_frame = 16 * 2**20
     async with serve(app.handler, None, HTTP_PORT, process_request=app.process_request,
@@ -879,7 +924,7 @@ async def main() -> None:
                              process_request=app.process_request, ssl=ssl_ctx,
                              max_size=max_frame):
                 log.info("HTTPS/wss listening on :%d  (wand-sim: https://%s:%d/wandsim/)",
-                         HTTPS_PORT, app.lan_ip, HTTPS_PORT)
+                         HTTPS_PORT, url_host, HTTPS_PORT)
                 await asyncio.Future()
         else:
             log.warning("no certs in %s -> HTTPS/:%d disabled. "

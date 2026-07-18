@@ -1,0 +1,5 @@
+name: Phoneharmonic Wand
+description: Full UNO Q wand — streams Modulino Movement (IMU) + Distance (ToF) over WiFi to the Phoneharmonic server, with LED/buzzer feedback.
+ports: []
+bricks: []
+icon: 🪄

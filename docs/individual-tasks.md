@@ -1,0 +1,4 @@
+- Jeremy: Laptop to phone communication + thinking of justification for wand
+- Chloe: CV Gestures
+- Caellum: Models
+- Shawn: Arduino Data to laptop 

@@ -29,6 +29,12 @@ SONG_EDIT = "song.edit"         # {song:{name,bpm,parts:[{instrument,is_drum,is_
 SONG_HUM = "song.hum"           # {frames:[[t_ms, midi_float, rms], ...]}  hummed melody -> new song
 SONG_FILE = "song.file"         # {name}  load songs/<name>.mid from the server's disk
 CLOCK_REPORT = "clock.report"   # {theta, rtt}  section's own sync estimate (debug/health readout)
+CV_STATE = "cv.state"           # {gesture|null, mode, confidence}  debounced webcam recognizer state
+
+# Closed vocabularies for CV_STATE. Keeping these server-side prevents arbitrary
+# client strings (including control characters) from being written to the log.
+CV_GESTURES = ("PALM", "PINCH", "FIST", "ONE_FINGER", "TWO_FINGERS", "THREE_FINGERS")
+CV_MODES = ("NONE", "SELECT", "DETERMINISTIC", "AI")
 
 # --- Server -> Client ---
 WELCOME = "welcome"             # {v, client_id, role, server_time, config}
@@ -38,7 +44,10 @@ SCHED_NOTES = "sched.notes"     # {events:[{id, section, at, dur, note, vel, art
 SCHED_CANCEL = "sched.cancel"   # {ids?:[...], section?, after?} | {allnotesoff:true}
 ROSTER = "roster"               # {playing, sections:[...], wand:{...}, engine:{...}}
 ENGINE_STATE = "engine.state"   # {last_choice, gesture, playing, bpm, song}  live, on each change
-WAND_STATE = "wand.state"       # {grabbed, aim_section, yaw_deg}   -> stage/admin, throttled
+# {grabbed, aim_section, yaw_deg, imu?:{seq,batches,frames,invalid_frames,
+# seq_gaps,last_frame,last_rx_server_ms}} -> stage/admin, throttled
+WAND_STATE = "wand.state"
+WAND_CMD = "wand.cmd"           # {playing, mode:"ai"|"det", aim:section_id|null, seq}  -> wand: reflect show state on the board
 ANNOUNCE = "announce"           # {text, audio_b64?, mime?}  commentator line -> stage/admin
 FX_TENSION = "fx.tension"       # {value: 0..1}  proximity build-up -> sections + stage
 FX_EXPR = "fx.expr"             # {section, semis, gain}  deterministic-mode expression warp

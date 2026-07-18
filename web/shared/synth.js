@@ -291,12 +291,21 @@ export class Synth {
     }
   }
 
-  // Proximity build-up: 0 = open, 1 = fully washed out (wand ToF -> fx.tension).
+  // Proximity build-up: 0 = open, 1 = fully "squished" (wand ToF -> fx.tension).
+  // Near the floor the master low-pass sweeps closed AND the limiter clamps down,
+  // so the room goes muffled + compressed ("underwater"), not just darker.
   setTension(v) {
     if (!this.fx) return;
     const t = Math.max(0, Math.min(1, v || 0));
+    const now = this.ctx.currentTime;
     const f = 250 + 17750 * Math.pow(1 - t, 2);
-    this.fx.frequency.setTargetAtTime(f, this.ctx.currentTime, 0.08);
+    this.fx.frequency.setTargetAtTime(f, now, 0.08);
+    if (this.limiter) {
+      // Squish the dynamics as t rises, easing back to the ear-safety defaults
+      // (-9 dB / 4:1) when open. Doesn't touch master.gain, so fx.expr is free.
+      this.limiter.threshold.setTargetAtTime(-9 - 26 * t, now, 0.08);   // -> -35 dB
+      this.limiter.ratio.setTargetAtTime(4 + 8 * t, now, 0.08);         // -> 12:1
+    }
   }
 
   panic() {

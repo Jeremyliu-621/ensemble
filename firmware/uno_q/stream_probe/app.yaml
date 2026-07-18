@@ -1,0 +1,5 @@
+name: Phoneharmonic IMU Stream Probe
+description: Streams Modulino Movement IMU samples over WiFi to the Phoneharmonic server.
+ports: []
+bricks: []
+icon: 🪄

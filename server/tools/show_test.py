@@ -7,7 +7,8 @@ Covers:
   [1] show start -> commentator line (via mock Backboard) reaches the stage
   [2] MPR121 pad down/up forces/releases a candidate (roster reflects it)
   [3] ToF distance -> fx.tension broadcast with the right value
-  [4] IMU yaw -> wand.state with an aimed section
+  [4] IMU yaw -> wand.state diagnostics; malformed rows are filtered; a new
+      hardware wand resets the stream counters
   [5] show stop -> manifest written; the event hash chain verifies
 
 Run:  python server/tools/show_test.py     (from repo root)
@@ -119,7 +120,45 @@ async def run(shows_dir: str) -> int:
     await wand.send(json.dumps({"t": "wand.imu", "seq": 1, "frames": frames}))
     st = await recv_until(stage, "wand.state", pred=lambda m: m.get("aim_section") == sid)
     assert st, "no wand.state with the aimed section"
+    imu = st.get("imu", {})
+    assert imu.get("seq") == 1, f"wand.state missing IMU sequence telemetry: {imu}"
+    assert imu.get("batches") == 1 and imu.get("frames") == 5, \
+        f"wand.state has wrong IMU counters: {imu}"
+    assert imu.get("invalid_frames") == 0 and imu.get("seq_gaps") == 0, \
+        f"wand.state reports an unhealthy IMU stream: {imu}"
     print(f"    aiming at {st['aim_section']} (yaw {st['yaw_deg']}°)")
+    print(f"    stream telemetry: {imu['batches']} batch / {imu['frames']} frames, no errors")
+
+    # A malformed row with an extreme would-be gyro value must be counted but
+    # never reach WandAimer.
+    await asyncio.sleep(0.2)
+    await wand.send(json.dumps({
+        "t": "wand.imu", "seq": 2,
+        "frames": [[1000, 0, 0, 9.81, 0, 100000]],  # six fields, not seven
+    }))
+    bad = await recv_until(
+        stage, "wand.state",
+        pred=lambda m: (m.get("imu") or {}).get("invalid_frames") == 1,
+    )
+    assert bad, "malformed IMU diagnostics were not broadcast"
+    assert bad["yaw_deg"] == st["yaw_deg"], "malformed IMU row reached WandAimer"
+    assert bad["imu"]["frames"] == 5 and bad["imu"]["batches"] == 2, bad["imu"]
+
+    # The newest hardware wand owns the slot. Its diagnostics start clean, and
+    # its first arbitrary sequence value is a baseline rather than a gap.
+    replacement, _ = await ws("wand")
+    reset_frames = [[200 + i * 20.0, 0, 0, 9.81, 0, 0, 0] for i in range(5)]
+    await replacement.send(json.dumps({"t": "wand.imu", "seq": 100,
+                                       "frames": reset_frames}))
+    reset = await recv_until(
+        stage, "wand.state",
+        pred=lambda m: (m.get("imu") or {}).get("seq") == 100,
+    )
+    assert reset, "replacement hardware wand produced no diagnostics"
+    reset_imu = reset["imu"]
+    assert (reset_imu["batches"], reset_imu["frames"], reset_imu["invalid_frames"],
+            reset_imu["seq_gaps"]) == (1, 5, 0, 0), reset_imu
+    print("    malformed row filtered; replacement wand counters reset ✓")
 
     print("[5] show stop -> manifest written, hash chain verifies")
     await admin.send(json.dumps({"t": "admin.cmd", "cmd": "stop"}))
@@ -137,7 +176,7 @@ async def run(shows_dir: str) -> int:
         assert want in kinds, f"missing ledger kind {want} (have {sorted(kinds)})"
     print(f"    {len(events)} events, head {manifest['head_hash'][:16]}…, chain verifies ✓")
 
-    for c in (stage, admin, section, wand):
+    for c in (stage, admin, section, wand, replacement):
         await c.close()
     print("\nALL SHOW CHECKS PASSED ✓")
     return 0
