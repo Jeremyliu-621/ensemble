@@ -5,8 +5,10 @@ Phoneharmonic demo modes with hand gestures. MediaPipe reads the user's physical
 left hand from the webcam while the interface renders only the tracked hand
 skeleton over a black background.
 
-This directory is intentionally self-contained and does not connect to the wand,
-phone assignment, or Phoneharmonic server code.
+The CV pipeline is self-contained (no dependency on `web/` or `server/` code) and
+runs fully offline. When the Phoneharmonic server is reachable, an optional link
+in `net/` mirrors transport and mode gestures onto the wire — see
+[Server link](#server-link) below.
 
 ## Gesture mapping
 
@@ -23,8 +25,33 @@ The three modes are mutually exclusive and latched. Releasing the triggering pos
 does not clear the mode. The mode remains marked as **toggled** until another mode
 gesture replaces it.
 
-Deterministic Edit and AI Edit currently represent state only. They do not change
-the audio yet.
+Deterministic Edit and AI Edit represent state only in the local editor. When the
+server link is connected they are also sent as `wand.mode` (see below).
+
+## Server link
+
+The app joins the Phoneharmonic server as **`role: "admin"`** — deliberately *not*
+a wand role, because all wand roles share one wand slot (latest wins) and the
+physical Arduino wand owns it. As `admin` the CV app drives the show without
+clobbering the wand's IMU stream. Gestures map onto the wire protocol
+(`server/protocol.py`) as:
+
+| Gesture | Message |
+|---|---|
+| Open palm | `admin.cmd {cmd:"start"}` |
+| Closed fist | `admin.cmd {cmd:"stop"}` |
+| Pinch + move left/right | `admin.cmd {cmd:"rewind"|"forward"}` on release |
+| Two fingers (Deterministic) | `wand.mode {mode:"det"}` |
+| Three fingers (AI) | `wand.mode {mode:"ai"}` |
+| One finger (Select) | local only — selection follows the wand's aim server-side |
+
+The link is best-effort: if the server is unreachable, messages queue then drop
+and the prototype keeps working offline. The **Server** row in the System card
+shows `Connected` / `Offline`.
+
+By default it connects to `ws://<page-host>:8080/ws` (so running the page on the
+laptop targets the local server). Override with a `?ws=` query param, e.g.
+`http://127.0.0.1:8765/?ws=ws://172.20.10.3:8080/ws`.
 
 ## Requirements
 
@@ -85,6 +112,9 @@ cv_hand_movements/
 |   |-- commands.js       Gesture-to-transport routing
 |   |-- player.js         Tone.js MIDI playback
 |   `-- timeline.js       Piano roll and scrub position mapping
+|-- net/
+|   |-- conn.js           Reconnecting WebSocket client (role "admin")
+|   `-- emit.js           Gesture-to-server-message mapping
 |-- tests/
 |   `-- cv.test.mjs       Pure JavaScript behavior tests
 |-- ARCHITECTURE.md       Detailed pipeline and design boundaries
