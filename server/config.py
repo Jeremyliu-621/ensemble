@@ -56,7 +56,10 @@ SESSION_FILE = pathlib.Path(os.environ.get("WM_SESSION_FILE", str(SERVER_DIR / "
 MODEL_URL = os.environ.get("WM_MODEL_URL", "")
 MODEL_NAME = os.environ.get("WM_MODEL_NAME", "")
 MODEL_KEY = os.environ.get("WM_MODEL_KEY", "")
-MODEL_TIMEOUT_MS = float(os.environ.get("WM_MODEL_TIMEOUT_MS", "800"))  # then the heuristic covers
+# Measured Freesolo serving latency: ~0.9-1.1s warm. A reply that misses this
+# bar lands at the next one (decisions persist until the next gesture), so the
+# budget is generous; the heuristic covers anything slower.
+MODEL_TIMEOUT_MS = float(os.environ.get("WM_MODEL_TIMEOUT_MS", "2000"))
 
 # --- Bar-line model (optional; the "music editing" generator) ---
 # Writes a fresh accompaniment line per bar, offered as the "generated"
