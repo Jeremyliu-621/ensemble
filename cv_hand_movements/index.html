@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Phoneharmonic — CV Gesture Prototype</title>
+  <style>
+    :root {
+      --bg: #0c0d12; --panel: #14161f; --line: #262a38;
+      --ink: #eef1f8; --muted: #8b90a6; --accent: #8b7bff; --ok: #46d17a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; background: var(--bg); color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    #app { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: minmax(0,1fr) auto;
+      gap: 16px; height: 100%; padding: 16px; }
+    #editor { grid-column: 1 / -1; }
+    @media (max-width: 860px) { #app { grid-template-columns: 1fr; } }
+
+    /* stage */
+    #stage { position: relative; background: #000; border-radius: 16px; overflow: hidden;
+      border: 1px solid var(--line); }
+    #video, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #video { object-fit: cover; transform: scaleX(-1); opacity: 0; pointer-events: none; }
+    #overlay { transform: scaleX(-1); }
+    #start { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px; cursor: pointer; text-align: center;
+      background: radial-gradient(circle at 50% 38%, #1a1b2e, #0c0d12); padding: 24px; }
+    #start h1 { font-size: clamp(1.6rem, 5vw, 2.4rem); letter-spacing: -0.02em; }
+    #start p { color: var(--muted); max-width: 40ch; line-height: 1.5; }
+    #start .cta { margin-top: 6px; padding: 10px 22px; border-radius: 999px; font-weight: 700;
+      background: var(--accent); color: #0c0d12; }
+    #loading { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 4;
+      background: #0009; padding: 6px 14px; border-radius: 999px; font: 13px ui-monospace, monospace;
+      display: none; }
+
+    /* persistent, non-blocking mode status */
+    #modeModal { position: absolute; top: 14px; left: 14px; z-index: 3; width: min(320px, calc(100% - 28px));
+      display: grid; gap: 5px; padding: 13px 15px; background: #0e0f18e8; border: 1px solid var(--line);
+      border-left: 4px solid var(--muted); border-radius: 10px; backdrop-filter: blur(8px);
+      pointer-events: none; }
+    #modeModal[data-mode="SELECT"] { border-left-color: #4fc3f7; }
+    #modeModal[data-mode="DETERMINISTIC"] { border-left-color: #ffb74d; }
+    #modeModal[data-mode="AI"] { border-left-color: #f06292; }
+    .mode-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .mode-kicker { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: .12em; }
+    #modeName { font-size: 18px; line-height: 1.2; }
+    #modeInstruction { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    #leftStatus { color: #ff9f45; font-size: 11px; white-space: nowrap; }
+    #leftStatus.ok { color: var(--ok); }
+
+    /* big gesture badge, overlaid on stage */
+    #badge { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 3;
+      display: flex; align-items: center; gap: 12px; padding: 12px 26px; border-radius: 14px;
+      background: #0e0f18cc; border: 1px solid var(--line); backdrop-filter: blur(8px);
+      opacity: 0; transition: opacity .12s ease; }
+    #badge.show { opacity: 1; }
+    #badge .glyph { font-size: 30px; }
+    #badge .label { font-size: 26px; font-weight: 800; letter-spacing: .04em; }
+
+    /* side panel */
+    #panel { display: flex; flex-direction: column; gap: 12px; overflow: auto; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+    .card h2 { font-size: 12px; letter-spacing: .12em; color: var(--muted); text-transform: uppercase;
+      margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .gest-now { display: flex; align-items: center; gap: 14px; }
+    .gest-now .glyph { font-size: 42px; width: 52px; text-align: center; }
+    .gest-now .name { font-size: 26px; font-weight: 800; }
+    .gest-now .name.idle { color: var(--muted); font-weight: 600; font-size: 20px; }
+    .bar { height: 8px; border-radius: 999px; background: #23263340; overflow: hidden; margin-top: 12px; }
+    .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+    .rows { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; font-size: 14px; }
+    .rows .k { color: var(--muted); }
+    .rows .v { text-align: right; font-variant-numeric: tabular-nums; }
+    .rows .v.free { color: var(--ok); font-weight: 700; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 10px; line-height: 1.5; }
+    .log { font: 12px ui-monospace, monospace; color: var(--muted); max-height: 130px; overflow: auto;
+      display: flex; flex-direction: column-reverse; gap: 3px; }
+    .log b { color: var(--ink); }
+
+    /* MIDI editor */
+    #editor .head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    #editor .head h2 { margin: 0; }
+    #editor .spacer { flex: 1; }
+    #roll { width: 100%; height: 160px; border-radius: 10px; border: 1px solid var(--line);
+      display: block; cursor: crosshair; }
+    #roll.drag { border-color: var(--accent); }
+    .tbtn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 9px;
+      border: 1px solid var(--line); background: transparent; color: var(--ink); font-weight: 700;
+      cursor: pointer; font-size: 13px; }
+    .tbtn:hover { border-color: var(--accent); }
+    .tbtn.on { background: var(--accent); color: #0c0d12; border-color: var(--accent); }
+    .tbtn small { color: var(--muted); font-weight: 600; }
+    .tbtn.on small { color: #0c0d12cc; }
+    #pos { font: 13px ui-monospace, monospace; color: var(--muted); font-variant-numeric: tabular-nums; }
+    #clip { color: var(--muted); font-size: 13px; }
+    .gmap { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+    .gmap span b { color: var(--ink); }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="overlay"></canvas>
+      <div id="loading">loading gesture model…</div>
+      <div id="modeModal" data-mode="NONE" role="status" aria-live="polite">
+        <div class="mode-top">
+          <span class="mode-kicker">Current mode</span>
+          <span id="leftStatus">Left hand not detected</span>
+        </div>
+        <strong id="modeName">No mode toggled</strong>
+        <span id="modeInstruction">Show 1, 2, or 3 fingers</span>
+      </div>
+      <div id="badge"><span class="glyph" id="badgeGlyph">✋</span><span class="label" id="badgeLabel">PALM</span></div>
+      <div id="start">
+        <h1>🖐️ CV Gesture Prototype</h1>
+        <p>Reads gestures only from your <b>physical left hand</b>. Use one, two, or three fingers
+           to switch modes, or an open palm, closed fist, and pinch to control playback.</p>
+        <div class="cta">Tap to start camera</div>
+      </div>
+    </div>
+
+    <div id="panel">
+      <div class="card">
+        <h2>Gesture Recognition</h2>
+        <div class="gest-now">
+          <div class="glyph" id="nowGlyph">·</div>
+          <div class="name idle" id="nowName">waiting…</div>
+        </div>
+        <div class="bar"><i id="confBar"></i></div>
+      </div>
+
+      <div class="card">
+        <h2>Control Hand</h2>
+        <div class="rows">
+          <div class="k">Physical left</div><div class="v" id="ctrlHand">Not detected</div>
+          <div class="k">Handedness</div><div class="v" id="ctrlReason">Physical left only</div>
+          <div class="k">Hands seen</div><div class="v" id="handCount">0</div>
+        </div>
+        <div class="hint">Right-hand gestures and landmarks are ignored, even when both hands are visible.</div>
+      </div>
+
+      <div class="card">
+        <h2>System</h2>
+        <div class="rows">
+          <div class="k">Delegate</div><div class="v" id="delegate">—</div>
+          <div class="k">FPS</div><div class="v" id="fps">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Event Log</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+
+    <div id="editor" class="card">
+      <div class="head">
+        <h2>MIDI Timeline</h2>
+        <button class="tbtn" id="btnPlay">▶︎ Play <small>✋</small></button>
+        <button class="tbtn" id="btnRewind">⏮ Rewind</button>
+        <button class="tbtn" id="btnPrev">◀ Prev</button>
+        <button class="tbtn" id="btnNext">Next ▶</button>
+        <button class="tbtn" id="btnLoop">↻ Loop</button>
+        <span class="spacer"></span>
+        <span id="clip">no clip</span>
+        <span id="pos">0:00 / 0:00</span>
+        <label class="tbtn" for="file">⬆ Upload<input id="file" type="file" accept=".mid,.midi" hidden></label>
+      </div>
+      <canvas id="roll"></canvas>
+      <div class="gmap">
+        <span><b>✋ Palm</b> play</span>
+        <span><b>✊ Fist</b> pause</span>
+        <span><b>🤏 Pinch</b> + move = scrub</span>
+        <span><b>1 finger</b> select mode</span>
+        <span><b>2 fingers</b> deterministic edit mode</span>
+        <span><b>3 fingers</b> AI edit mode</span>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
