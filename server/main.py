@@ -16,6 +16,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import socket
 import ssl
 import uuid
@@ -45,16 +46,50 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)-6s %(levelna
 log = logging.getLogger("main")
 
 
+def _ip_score(ip: str) -> int:
+    """Rank an IPv4 by how likely it is the real Wi-Fi/LAN address a phone on the
+    same network can reach. Home Wi-Fi (192.168) beats corporate (10), both beat
+    the Docker/WSL bridges (172.17/18) and Tailscale/CGNAT (100.64/10)."""
+    p = ip.split(".")
+    if len(p) != 4 or not all(x.isdigit() for x in p):
+        return -100
+    a, b = int(p[0]), int(p[1])
+    if ip.startswith("127."):
+        return -50
+    if a == 100 and 64 <= b <= 127:   # CGNAT / Tailscale — unreachable from LAN
+        return -40
+    if a == 172 and b in (17, 18):    # Docker / WSL virtual bridge
+        return -20
+    if a == 192 and b == 168:
+        return 100
+    if a == 10:
+        return 80
+    if a == 172 and 16 <= b <= 31:
+        return 60
+    return 0                          # a public/other IP: usable but not preferred
+
+
 def detect_lan_ip() -> str:
-    """Best-effort local LAN IP (no packets actually sent)."""
+    """Local Wi-Fi/LAN IP for the QR. Override with WM_LAN_IP if auto-detection
+    picks the wrong interface (multi-homed machines are ambiguous)."""
+    override = os.environ.get("WM_LAN_IP")
+    if override:
+        return override
+    candidates: list[str] = []
+    try:
+        candidates += socket.gethostbyname_ex(socket.gethostname())[2]
+    except Exception:
+        pass
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
+        candidates.append(s.getsockname()[0])
     except Exception:
-        return "127.0.0.1"
+        pass
     finally:
         s.close()
+    candidates = list(dict.fromkeys(candidates))  # dedupe, keep order
+    return max(candidates, key=_ip_score) if candidates else "127.0.0.1"
 
 
 class App:
@@ -120,11 +155,14 @@ class App:
             self.session.wand = WandSlot(connected=True, variant=variant)
             log.info("wand connected (variant=%s)", variant)
         elif role in ("stage", "admin"):
-            # Phone wand over the LAN (HTTPS on :8443 — DeviceMotion needs a secure
-            # context). This is the URL the stage QR encodes.
-            config["wand_url"] = f"https://{self.lan_ip}:{HTTPS_PORT}/wandsim/?s={self.session.name}"
+            # The stage QR points at a single /join/ choice page (HTTPS on :8443 —
+            # DeviceMotion for the wand needs a secure context; sections work there
+            # too). The phone then picks "Conduct" (wand) or "Be an instrument"
+            # (section). `wand_url` is the key the stage QR reads.
+            base = f"https://{self.lan_ip}:{HTTPS_PORT}"
+            config["wand_url"] = f"{base}/join/?s={self.session.name}"
             config["cv_url"] = f"http://{self.lan_ip}:{HTTP_PORT}/cvwand/"
-            config["join_url"] = f"http://{self.lan_ip}:{HTTP_PORT}/section/?s={self.session.name}"
+            config["join_url"] = f"{base}/join/?s={self.session.name}"
             config["lan_ip"] = self.lan_ip
 
         await send_json(ws, {
@@ -313,8 +351,11 @@ async def main() -> None:
     ssl_ctx = build_ssl_context()
 
     log.info("LAN IP detected: %s", app.lan_ip)
-    log.info("stage/admin:  http://%s:%d/stage/?admin=1", app.lan_ip, HTTP_PORT)
-    log.info("section join: http://%s:%d/section/?s=%s", app.lan_ip, HTTP_PORT, DEFAULT_SESSION)
+    if _ip_score(app.lan_ip) <= 0:
+        log.warning("  ^ that looks like a virtual/VPN interface (Docker/WSL/Tailscale), which")
+        log.warning("    phones on your Wi-Fi CANNOT reach. Connect this machine to the same")
+        log.warning("    Wi-Fi as the phones, or start with:  WM_LAN_IP=192.168.x.x python server/main.py")
+    log.info("open on this laptop:  http://localhost:%d/", HTTP_PORT)
 
     # host=None binds all interfaces (IPv4 + IPv6), so both localhost (::1 on
     # Windows) and the LAN IPv4 reach the server.

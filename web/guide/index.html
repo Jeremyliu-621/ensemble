@@ -53,6 +53,45 @@
     svg { display: block; width: 100%; height: auto; }
     .foot { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--dim); }
     .foot a { margin-right: 1.25rem; font-weight: 600; }
+
+    /* --- gesture cheat-sheet: animated motion -> resulting musical line --- */
+    .moves { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; margin: 1rem 0; }
+    @media (max-width: 620px) { .moves { grid-template-columns: 1fr; } }
+    .move { display: flex; align-items: center; gap: 0.5rem; background: var(--card);
+      border: 1px solid var(--line); border-radius: 12px; padding: 0.7rem 0.8rem; }
+    .mcol { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .mbox { position: relative; width: 76px; height: 58px; background: #0d0507;
+      border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .mlabel { font-size: 0.75rem; color: var(--dim); text-align: center; }
+    .marrow { color: var(--acc); font-weight: 800; font-size: 1.1rem; }
+    .dot { position: absolute; width: 13px; height: 13px; margin: -6px 0 0 -6px; border-radius: 50%;
+      background: var(--acc); box-shadow: 0 0 9px var(--acc); }
+    @keyframes m-big { 0%{left:12%;top:64%} 25%{left:80%;top:16%} 50%{left:20%;top:76%} 75%{left:82%;top:34%} 100%{left:12%;top:64%} }
+    @keyframes m-gentle { 0%,100%{left:42%;top:56%} 50%{left:58%;top:46%} }
+    @keyframes m-twist { 0%{left:50%;top:22%} 25%{left:76%;top:50%} 50%{left:50%;top:78%} 75%{left:24%;top:50%} 100%{left:50%;top:22%} }
+    @keyframes m-raise { 0%{left:46%;top:82%} 46%{left:52%;top:12%} 54%{left:52%;top:12%} 100%{left:46%;top:82%} }
+    .dot.big { animation: m-big 1.3s infinite ease-in-out; }
+    .dot.gentle { animation: m-gentle 3.2s infinite ease-in-out; }
+    .dot.twist { animation: m-twist 2s infinite linear; }
+    .dot.raise { animation: m-raise 2s infinite ease-in-out; }
+    .bars { position: absolute; inset: 0; display: flex; align-items: flex-end; gap: 3px; padding: 7px; }
+    .bars i { flex: 1; background: var(--acc); border-radius: 2px 2px 0 0; height: 25%; opacity: .9; }
+    @keyframes b-busy { 0%,100%{height:14%} 50%{height:88%} }
+    .bars.busy i { animation: b-busy .34s infinite ease-in-out; }
+    .bars.busy i:nth-child(2){animation-delay:.06s} .bars.busy i:nth-child(3){animation-delay:.12s}
+    .bars.busy i:nth-child(4){animation-delay:.18s} .bars.busy i:nth-child(5){animation-delay:.24s}
+    @keyframes b-soft { 0%,100%{height:32%;opacity:.55} 50%{height:66%;opacity:1} }
+    .bars.soft i { animation: b-soft 3s infinite ease-in-out; }
+    .bars.contra i:nth-child(1){height:82%} .bars.contra i:nth-child(2){height:64%}
+    .bars.contra i:nth-child(3){height:48%} .bars.contra i:nth-child(4){height:32%} .bars.contra i:nth-child(5){height:18%}
+    .bars.contra i { animation: b-soft 1.7s infinite ease-in-out; }
+    .bars.high i { height: 82%; } .bars.high i:nth-child(even){height:68%}
+    .bars.high i { animation: b-busy 1.1s infinite ease-in-out; }
+
+    .cheat { margin: 1rem 0; }
+    .crow { display: grid; grid-template-columns: 1fr auto 1.2fr; gap: .5rem; align-items: center;
+      padding: .5rem .2rem; border-bottom: 1px solid var(--line); font-size: .95rem; }
+    .crow b { color: var(--acc); text-align: right; } .crow .a { color: var(--acc); font-weight: 800; }
   </style>
 </head>
 <body>
@@ -169,6 +208,54 @@
     <span class="chip">raise / lower → <b>octave up / down</b></span>
   </div>
   <p class="lede" style="font-size:0.95rem">Changes land on the <b>next bar</b> (~2 seconds), so conduct a beat ahead — like a real conductor cueing what's coming.</p>
+
+  <div class="callout">
+    <b>You must "grab" to conduct.</b> Pinch thumb + index (webcam) or press &amp; hold
+    the screen (phone) to <b>grab</b>. The motion you make <em>during</em> the grab is
+    the gesture, read the moment you release. Nothing happens until you grab.
+  </div>
+
+  <p><b>What each motion does</b> — same on webcam and phone. The gold dot is your hand; the bars are the line it produces:</p>
+
+  <div class="moves">
+    <div class="move">
+      <div class="mcol"><div class="mbox"><div class="dot big"></div></div><div class="mlabel">big &amp; fast</div></div>
+      <div class="marrow">→</div>
+      <div class="mcol"><div class="mbox"><div class="bars busy"><i></i><i></i><i></i><i></i><i></i></div></div><div class="mlabel">busy, rhythmic</div></div>
+    </div>
+    <div class="move">
+      <div class="mcol"><div class="mbox"><div class="dot gentle"></div></div><div class="mlabel">small &amp; gentle</div></div>
+      <div class="marrow">→</div>
+      <div class="mcol"><div class="mbox"><div class="bars soft"><i></i><i></i><i></i><i></i><i></i></div></div><div class="mlabel">soft, sustained</div></div>
+    </div>
+    <div class="move">
+      <div class="mcol"><div class="mbox"><div class="dot twist"></div></div><div class="mlabel">twist / spin</div></div>
+      <div class="marrow">→</div>
+      <div class="mcol"><div class="mbox"><div class="bars contra"><i></i><i></i><i></i><i></i><i></i></div></div><div class="mlabel">counter-melody</div></div>
+    </div>
+    <div class="move">
+      <div class="mcol"><div class="mbox"><div class="dot raise"></div></div><div class="mlabel">raise up</div></div>
+      <div class="marrow">→</div>
+      <div class="mcol"><div class="mbox"><div class="bars high"><i></i><i></i><i></i><i></i><i></i></div></div><div class="mlabel">up an octave</div></div>
+    </div>
+  </div>
+
+  <div class="cheat">
+    <div class="crow"><b>Big &amp; fast</b><span class="a">→</span><span>Busy, rhythmic line</span></div>
+    <div class="crow"><b>Small &amp; gentle</b><span class="a">→</span><span>Soft harmony under the tune</span></div>
+    <div class="crow"><b>Barely move</b><span class="a">→</span><span>Goes quiet — a rest or held pad</span></div>
+    <div class="crow"><b>Twist (wrist / spin phone)</b><span class="a">→</span><span>Counter-melody weaving against the tune</span></div>
+    <div class="crow"><b>Quick flick</b><span class="a">→</span><span>Echo of the previous bar</span></div>
+    <div class="crow"><b>Raise your hand up</b><span class="a">→</span><span>Jumps the line up an octave</span></div>
+    <div class="crow"><b>Lower your hand down</b><span class="a">→</span><span>Drops it down an octave</span></div>
+  </div>
+
+  <div class="callout warn">
+    <b>Two tips.</b> Up/down (the octave move) is reliable on the <b>webcam</b> — it
+    tracks your hand's real height — but rough on the phone; there, lean on speed and
+    twist. And to learn the sounds fast, open the <a href="../editor/">Control Room</a>
+    and click the accompaniment buttons to hear each one before you try to gesture it.
+  </div>
 
   <!-- ============ 5. WAYS TO CONDUCT ============ -->
   <h2><span class="n">5</span>Three ways to conduct</h2>
