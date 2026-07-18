@@ -124,6 +124,21 @@ async def integration(shows_dir: str) -> None:
     assert fx and fx["semis"] == 12 and fx["section"] == sid, fx
     print(f"    lift -> +{fx['semis']} semitones on {fx['section']} (gain {fx['gain']})")
 
+    print("[5b] det sub-modes: the button cycles WHAT height controls")
+    await wand.send(json.dumps({"t": "wand.mode", "mode": "det", "param": "volume"}))
+    await recv_until(stage, "fx.expr")                      # the neutral reset
+    await asyncio.sleep(0.15)                               # clear the 100ms expr throttle
+    await wand.send(json.dumps({"t": "wand.imu", "seq": 2, "frames": frames}))
+    fx = await recv_until(stage, "fx.expr", pred=lambda m: m.get("gain", 0) > 1.0)
+    assert fx and fx["semis"] == 0 and abs(fx["gain"] - 1.2) < 0.01, fx
+    await wand.send(json.dumps({"t": "wand.mode", "mode": "det", "param": "filter"}))
+    await asyncio.sleep(0.15)
+    lowered = [[i * 20.0, 0.0, -9.8, 0.0, 0.0, 0.0, 0.0] for i in range(5)]
+    await wand.send(json.dumps({"t": "wand.imu", "seq": 3, "frames": lowered}))
+    ten = await recv_until(stage, "fx.tension", pred=lambda m: m["value"] == 1.0)
+    assert ten is not None, "filter param did not drive fx.tension"
+    print(f"    volume: gain {fx['gain']} semis 0; filter: lowered wand -> tension 1.0 (washed)")
+
     print("[6] wand/palm may drive transport verbs, nothing else")
     await wand.send(json.dumps({"t": "admin.cmd", "cmd": "rewind"}))
     err = await recv_until(wand, "err", timeout=1.0)

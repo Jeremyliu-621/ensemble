@@ -336,14 +336,22 @@ class App:
             return
         if t == P.WAND_MODE:                    # physical toggle: ai composes / det controls
             mode = "det" if msg.get("mode") == "det" else "ai"
-            if mode != self.session.wand.mode:
+            param = msg.get("param")
+            changed = mode != self.session.wand.mode
+            if param in ("pitch", "volume", "filter") and param != self.session.wand.det_param:
+                self.session.wand.det_param = param
+                changed = True
+            if changed:
                 self.session.wand.mode = mode
                 self.wand.reset()               # a mid-grab toggle must not strand a window
-                if mode == "ai":                # leaving det: release the warp everywhere
-                    await self.hub.broadcast({"t": P.FX_EXPR, "section": P.SECTION_ALL,
-                                              "semis": 0, "gain": 1.0}, roles=("section", "stage"))
-                self.showlog.record("wand.mode", mode=mode)
-                log.info("wand mode -> %s", mode)
+                # Any mode/param change releases the previous warp everywhere, so a
+                # parameter never sticks after the wand stops controlling it.
+                await self.hub.broadcast({"t": P.FX_EXPR, "section": P.SECTION_ALL,
+                                          "semis": 0, "gain": 1.0}, roles=("section", "stage"))
+                await self.hub.broadcast({"t": P.FX_TENSION, "value": 0.0},
+                                         roles=("section", "stage"))
+                self.showlog.record("wand.mode", mode=mode, param=self.session.wand.det_param)
+                log.info("wand mode -> %s (%s)", mode, self.session.wand.det_param)
                 await self._broadcast_roster()
             return
         if t == P.WAND_FEEDBACK:
@@ -488,10 +496,12 @@ class App:
     _DEG = (0, 2, 4, 5, 7, 9, 11)   # major-scale semitone offsets (expression quantizer)
 
     async def _expression(self, frames: list, aim: str | None) -> None:
-        """Deterministic mode: the wand is a continuous controller. Lifting it
-        raises the pitch in scale-locked degrees (quantized, so it can never
-        sound wrong) and swells the volume with it, streamed to the aimed phone;
-        every other phone reads the section field and resets to neutral."""
+        """Deterministic mode: pure COORDINATE control, no motion involved. The
+        wand's tilt (gravity direction — an absolute coordinate, drift-free)
+        maps to the selected parameter: pitch = scale-locked degrees (quantized,
+        can never sound wrong), volume = a gain sweep, filter = the room-wide
+        tension filter. Streamed to the aimed phone; every other phone reads
+        the section field and resets to neutral."""
         row = frames[-1] if frames else None
         if not row or len(row) < 3:
             return
@@ -499,13 +509,24 @@ class App:
             tilt = max(-1.0, min(1.0, float(row[2]) / 9.8))   # ay = the lift axis
         except (TypeError, ValueError):
             return
-        oct_, step = divmod(round(tilt * 7), 7)
-        semis = oct_ * 12 + self._DEG[step]
-        gain = round(0.65 + 0.35 * (tilt + 1) / 2, 3)
         now = server_time_ms()
-        if (semis, gain) == self._last_expr or now - self._last_expr_ms < 100.0:
+        param = self.session.wand.det_param
+        if param == "filter":                    # raise = open/bright, lower = washed out
+            value = round(1.0 - (tilt + 1) / 2, 3)
+            if ("filter", value) == self._last_expr or now - self._last_expr_ms < 100.0:
+                return
+            self._last_expr, self._last_expr_ms = ("filter", value), now
+            await self.hub.broadcast({"t": P.FX_TENSION, "value": value},
+                                     roles=("section", "stage"))
             return
-        self._last_expr, self._last_expr_ms = (semis, gain), now
+        if param == "volume":
+            semis, gain = 0, round(0.3 + 0.9 * (tilt + 1) / 2, 3)
+        else:                                    # pitch
+            oct_, step = divmod(round(tilt * 7), 7)
+            semis, gain = oct_ * 12 + self._DEG[step], 1.0
+        if (param, semis, gain) == self._last_expr or now - self._last_expr_ms < 100.0:
+            return
+        self._last_expr, self._last_expr_ms = (param, semis, gain), now
         await self.hub.broadcast({"t": P.FX_EXPR, "section": aim or P.SECTION_ALL,
                                   "semis": semis, "gain": gain}, roles=("section", "stage"))
 

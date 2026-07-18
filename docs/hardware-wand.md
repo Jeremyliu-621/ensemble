@@ -31,7 +31,7 @@ the same wand. Latest wand to connect owns the single wand slot.
 | `wand.touch` | `{"pad": 0-11, "state": "down"\|"up"}` | on pad edge | Pads 0-5 force a candidate while held (0 lower_imitation, 1 contrary_motion, 2 sustained, 3 delayed, 4 rhythmic_dense, 5 rest); `up` returns to auto. Pads 6+ are yours for firmware-side modes |
 | `wand.range` | `{"mm": 234.0}` | ~10 Hz while valid | Proximity tension: 600mm+ = open, 100mm = full wash-out (fx.tension to every phone) |
 | `wand.recal` | `{"tw": ms}` | on a button press | Zeroes the aiming yaw ("this way is forward") |
-| `wand.mode` | `{"mode": "ai"\|"det"}` | on the physical toggle | **ai**: grabs become gesture windows the AI composes from. **det**: continuous control — lifting the wand streams scale-locked pitch + volume swell to the aimed phone (`fx.expr`); grabs are ignored |
+| `wand.mode` | `{"mode": "ai"\|"det", "param": "pitch"\|"volume"\|"filter"?}` | on the physical toggle (cycle: ai → det:pitch → det:volume → det:filter → ai) | **ai**: grabs become gesture windows the AI composes from. **det**: pure coordinate control — the wand's tilt (no motion needed) streams the selected parameter to the aimed phone: pitch = scale-locked degrees, volume = gain sweep, filter = the room tension filter. Grabs are ignored in det |
 | `wand.feedback` | `{"value": 1\|-1}` | on thumbs pads | Weights the last musical decision in the training data |
 
 Units and axis convention (MUST match — the server interprets, the wand only

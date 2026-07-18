@@ -27,6 +27,7 @@ class WandSlot:
     variant: str = "none"     # "sim" | "hw" | "none"
     aim_mode: str = "cycle"   # "cycle" (tap to select) | "yaw" (pointing)
     mode: str = "ai"          # "ai" (gestures compose) | "det" (continuous control)
+    det_param: str = "pitch"  # what det-mode height controls: "pitch" | "volume" | "filter"
 
 
 @dataclass
@@ -86,5 +87,6 @@ class SessionState:
                 "variant": self.wand.variant,
                 "aim_mode": self.wand.aim_mode,
                 "mode": self.wand.mode,
+                "det_param": self.wand.det_param,
             },
         }
