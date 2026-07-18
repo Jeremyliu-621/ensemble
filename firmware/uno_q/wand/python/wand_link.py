@@ -41,6 +41,7 @@ class WandLink:
         self._lock = threading.Lock()
         self._seq = 0
         self._range: float | None = None    # latest ToF mm from the MCU, if new
+        self._ws = None                      # live socket; None between reconnects
 
     # --- MCU uplink ingress (Bridge callback; may fire off-thread) ---
     def _on_imu(self, payload) -> None:
