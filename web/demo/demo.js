@@ -158,6 +158,17 @@ conn.on(P.ERR, (m) => log(`⚠ ${m.msg}`));
 
 conn.on(P.ENGINE_STATE, (m) => {
   lastState = m;
+  if (typeof m.intensity === "number") {
+    const i = m.intensity;
+    const mode = i > 0.53 ? "HARMONY" : i < 0.47 ? "HUSH" : "verbatim";
+    el("mode").textContent = mode + (mode === "HARMONY" ? " — chords blooming" :
+                                     mode === "HUSH" ? " — texture thinning" : "");
+    el("mode").style.color = mode === "HARMONY" ? "#e7c583" : mode === "HUSH" ? "#7fd1ff" : "#888";
+    const w = Math.abs(i - 0.5) * 100;                 // 0..50%
+    el("imeter").style.width = `${w}%`;
+    el("imeter").style.left = i >= 0.5 ? "50%" : `${50 - w}%`;
+    el("imeter").style.background = i >= 0.5 ? "#e7c583" : "#7fd1ff";
+  }
   el("choice").textContent = m.last_choice || "—";
   el("choice").style.color = COLORS[m.last_choice] || "#ddd";
   const src = m.decision_source || "?";

@@ -104,6 +104,7 @@ class Conductor:
             "forced": self._forced or "auto",
             "last_choice": self._last_choice,
             "decision_source": self._last_source,
+            "intensity": round(self._intensity, 3),
             "candidates": list(GENERATORS) + (["generated"] if self._barmodel.configured else []),
             "training_rows": self._datalog.rows,
             "gesture": self._gesture.as_dict() if self._gesture else None,
