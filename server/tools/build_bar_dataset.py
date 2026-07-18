@@ -63,6 +63,8 @@ RHYTHMS = [
     [(0, 4), (6, 2), (8, 4), (14, 2)],                                        # syncopated
     [(0, 8), (8, 4), (12, 4)],                                                # half + quarters
     [(0, 6), (6, 6), (12, 4)],                                                # dotted
+    [(0, 4), (8, 4), (12, 2)],                                                # gapped (rest on beat 2)
+    [(0, 2), (2, 2), (4, 2), (10, 2), (12, 2)],                               # phrase + rest + pickup
 ]
 
 

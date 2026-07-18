@@ -131,21 +131,25 @@ def arpeggiate(bar, prev, key: int) -> list:
 
 
 def echo(bar, prev, key: int) -> list:
-    """ANSWER: replay the previous bar's melody tail in THIS bar's silent
-    slots, an octave below, soft — call and response."""
+    """ANSWER: replay the previous bar's melody tail — in THIS bar's silent
+    slots when there are any, otherwise an octave below the melody where it
+    can't collide. Soft either way: call and response, not competition."""
     if not prev.melody:
         return []
     occupied = set()
     for (on, dur, _m) in bar.melody:
         for t in range(int(on), min(16, int(on + dur))):
             occupied.add(t)
+    bar_min = min((m for (_o, _d, m) in bar.melody), default=127)
     frag = sorted(prev.melody)[-3:]
     base = frag[0][0]
     out = []
     for (on, dur, m) in frag:
         at = min(14, 8 + (on - base) // 2)
         d = max(1, min(int(dur), 4))
-        if all(t not in occupied for t in range(int(at), min(16, int(at + d)))):
+        in_gap = all(t not in occupied for t in range(int(at), min(16, int(at + d))))
+        deep = (m - 12) <= bar_min - 7          # well under the melody: safe underlap
+        if in_gap or deep:
             out.append((at, d, m - 12, 0.35))
     return out
 

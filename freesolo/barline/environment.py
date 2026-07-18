@@ -120,8 +120,10 @@ def _style_score(rows: list, context: dict) -> float:
         for (on, dur, _m, *rest) in (context.get("melody") or []):
             for t in range(int(on), min(16, int(on + dur))):
                 occupied.add(t)
+        mel_min = min((int(m[2]) for m in (context.get("melody") or [])), default=127)
         def clear(r):
-            return all(t not in occupied for t in range(int(r[0]), min(16, int(r[0] + r[1]))))
+            in_gap = all(t not in occupied for t in range(int(r[0]), min(16, int(r[0] + r[1]))))
+            return in_gap or r[2] <= mel_min - 7    # a soft underlap also answers cleanly
         good = sum(1 for r in rows
                    if int(r[2]) % 12 in prev_pcs and clear(r) and r[3] <= 0.5) / n
         return 1.0 if good >= 0.75 and n <= 4 else 0.4 if good >= 0.5 else 0.1
