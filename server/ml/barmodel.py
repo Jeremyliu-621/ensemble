@@ -106,7 +106,7 @@ class RemoteBarModel:
         body = json.dumps({
             "model": config.BARMODEL_NAME,
             "messages": [{"role": "user", "content": bar_prompt_for(context)}],
-            "max_tokens": 300,
+            "max_tokens": 200,   # a 16-note bar is ~190 tokens; smaller cap = faster reply
             "temperature": 0.7,
             "response_format": {"type": "json_schema",
                                 "json_schema": {"name": "bar", "schema": BAR_SCHEMA}},

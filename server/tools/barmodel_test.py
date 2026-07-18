@@ -98,10 +98,11 @@ async def run() -> int:
     REPLY["content"] = '{"notes": [[0, 8, 100, 2.0], [8, 8, 41, 0.5]]}'
     c = Conductor()
     c.on_transport("start", 0.0)
-    await pull_bar(c)                       # bar 0 plays; prefetch for bar 1 fires
+    await pull_bar(c)                       # bar 0 plays; prefetch for bar 2 fires
     await asyncio.sleep(0.4)
+    await pull_bar(c)                       # bar 1
     c.set_forced("generated")
-    choice, ev = await pull_bar(c)
+    choice, ev = await pull_bar(c)          # bar 2 — the prefetched line lands here
     assert choice == "generated", f"got {choice}"
     line_ev = [e for e in ev if e.vel in (1.0, 0.5)]     # the sanitized line (melody is 0.9)
     assert len(line_ev) == 2, f"line events: {[(e.note, e.vel) for e in ev]}"
@@ -130,11 +131,12 @@ async def run() -> int:
     c.on_transport("start", 0.0)
     c.on_gesture(imu_window(accel_mag=12.0))             # asks the mock decision model
     await asyncio.sleep(0.5)
-    choice, _ = await pull_bar(c)                        # also prefetches bar 1's line
+    choice, _ = await pull_bar(c)                        # also prefetches bar 2's line
     assert c._last_source == "model", f"source {c._last_source}"
     await asyncio.sleep(0.5)
+    await pull_bar(c)                                    # bar 1
     c.set_forced("generated")
-    choice, ev = await pull_bar(c)
+    choice, ev = await pull_bar(c)                       # bar 2
     assert choice == "generated" and ev, "mock bar line did not arrive"
     print(f"    decision source=model, bar 1 forced -> {choice} ({len(ev)} events)")
     mock.shutdown()

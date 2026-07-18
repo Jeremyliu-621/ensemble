@@ -67,4 +67,7 @@ MODEL_TIMEOUT_MS = float(os.environ.get("WM_MODEL_TIMEOUT_MS", "2000"))
 BARMODEL_URL = os.environ.get("WM_BARMODEL_URL", "")
 BARMODEL_NAME = os.environ.get("WM_BARMODEL_NAME", "")
 BARMODEL_KEY = os.environ.get("WM_BARMODEL_KEY", "")
-BARMODEL_TIMEOUT_MS = float(os.environ.get("WM_BARMODEL_TIMEOUT_MS", "2000"))
+# Measured ~4.6s median per composed bar on Freesolo serving; the conductor
+# prefetches two bars ahead to absorb it. A faster host (e.g. Parasail) can
+# tighten both this and the prefetch horizon.
+BARMODEL_TIMEOUT_MS = float(os.environ.get("WM_BARMODEL_TIMEOUT_MS", "7000"))

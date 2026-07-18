@@ -265,17 +265,19 @@ class Conductor:
 
     def _take_generated(self, idx: int, cands: dict) -> None:
         """Add the bar model's prefetched line (if one landed for this bar) and
-        kick off the next bar's request — it rides this bar's playing time."""
+        request TWO bars ahead — measured serving latency for a composed bar is
+        ~4.6s, so the request needs two bars of playing time (~4.8s at 100 BPM)
+        to land. A faster serving host can drop this back to one."""
         line = self._barmodel.take(idx)
         if line:
             cands["generated"] = line
         if self._barmodel.configured:
-            nxt, prev = self.song.bar(idx + 1), self.song.bar(idx)
-            self._barmodel.prefetch(idx + 1, build_bar_context(
+            tgt, prev = self.song.bar(idx + 2), self.song.bar(idx + 1)
+            self._barmodel.prefetch(idx + 2, build_bar_context(
                 key_root=self.song.key_root, bpm=self.bpm,
-                chord_root=nxt.chord_root, chord_minor=nxt.chord_minor,
+                chord_root=tgt.chord_root, chord_minor=tgt.chord_minor,
                 style=style_for(self._gesture),
-                melody=nxt.melody, prev_melody=prev.melody), self.song.key_root)
+                melody=tgt.melody, prev_melody=prev.melody), self.song.key_root)
 
     # --- bar generation ---
     def _bar_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
