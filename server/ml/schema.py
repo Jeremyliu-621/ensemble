@@ -88,7 +88,7 @@ def parse_decision(text: str, source: str = "model") -> Decision | None:
 # the grid) — the model supplies contour and rhythm, the engine guarantees
 # playability.
 
-STYLES = ["dense", "calm", "counter", "echo", "free"]
+STYLES = ["dense", "calm", "counter", "echo", "free", "harmonize"]
 
 BAR_SCHEMA: dict = {
     "type": "object",
@@ -111,7 +111,8 @@ BAR_INSTRUCTION = (
     "sixteenths, midi pitch 40-84 in the given key, velocity 0.1-1.0. Match the "
     "requested style: dense=busy subdivision, calm=long low chord tones, "
     "counter=moves against the melody, echo=answers the previous bar, free=your "
-    "choice. Stay out of the melody's way."
+    "choice, harmonize=voice the bar's chord as a held pad (few long chord "
+    "tones, smooth voice leading). Stay out of the melody's way."
 )
 
 

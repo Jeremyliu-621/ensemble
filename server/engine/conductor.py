@@ -13,8 +13,9 @@ import math
 
 from config import MIN_LEAD_MS
 from engine.candidates import ART, GENERATORS, generate
+from engine.harmony import PAD_VEL, ROOT_VEL, bar_chords, chord_span, thin_grid, voice_lead
 from engine.song import builtin_song
-from engine.theory import midi_to_name, voice_triad
+from engine.theory import midi_to_name, triad, voice_triad
 from engine_api import CancelSpec, GestureWindow, NoteEvent, SectionInfo
 from gestures.features import GestureFeatures, extract_features
 from ml import heuristic
@@ -53,6 +54,9 @@ class Conductor:
         self._intensity = 0.5
         self._intensity_target = 0.5
         self.base_bpm = self.bpm                        # the song's own tempo (rubato pivots here)
+        self._chords = bar_chords(self.song)
+        self._pad_voices: list[int] | None = None
+        self._pad_until = -1
         self._model = RemoteModel()                     # trained policy (WM_MODEL_URL); optional
         self._barmodel = RemoteBarModel()               # trained line writer (WM_BARMODEL_URL)
         self._decision: Decision | None = None          # the policy's active answer, until the next gesture
@@ -68,6 +72,9 @@ class Conductor:
         self.song = song
         self._tracks = tracks or []
         self._part_map = None                   # a new song gets a fresh arrangement
+        self._chords = bar_chords(song)         # the song's harmony, per bar
+        self._pad_voices = None                 # voice-leading state for the pad layer
+        self._pad_until = -1                    # last bar covered by an emitted pad
         self.set_tempo(song.bpm)
         self._last_choice = None
         self._reanchor = True   # start the new song cleanly at the next scheduler tick
@@ -286,10 +293,12 @@ class Conductor:
             cands["generated"] = line
         if self._barmodel.configured:
             tgt, prev = self.song.bar(idx + 2), self.song.bar(idx + 1)
+            # On a real song the model's one job is chord theory: harmonize.
+            style = "harmonize" if self.song.parts else style_for(self._gesture)
             self._barmodel.prefetch(idx + 2, build_bar_context(
                 key_root=self.song.key_root, bpm=self.bpm,
                 chord_root=tgt.chord_root, chord_minor=tgt.chord_minor,
-                style=style_for(self._gesture),
+                style=style,
                 melody=tgt.melody, prev_melody=prev.melody), self.song.key_root)
 
     # --- bar generation ---
@@ -390,49 +399,53 @@ class Conductor:
         log.info("part assignment: %s", mapping or "round-robin")
 
     def _arrangement_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
-        """Play a loaded MIDI's parts distributed across sections, continuously
-        bent by the conducting envelope. Intensity 0.5 = the file exactly as
-        written; below it the texture thins and hushes, above it the dynamics
-        open up and (at a real push) the AI's melodic line joins the lead —
-        every bar re-derived, so the whole thing breathes instead of stepping.
-        The LLM arranger's part map routes parts; aiming SOLOS a phone; drums
-        play the percussion voice and never transpose."""
+        """The approved conducting vocabulary, and nothing else:
+        neutral = the file verbatim; calm = HUSH (beat-grid simplification,
+        softer); lift = HARMONY (voice-led chord pads + cello root, re-struck
+        only on chord changes — the model's generated layer when one arrived,
+        the deterministic theory otherwise). Tempo rubato rides the envelope.
+        Part map routes parts; aiming SOLOS a phone; drums never transpose."""
         i9 = self._intensity
         calm = max(0.0, 0.5 - i9) * 2            # 0..1 below neutral
         lift = max(0.0, i9 - 0.5) * 2            # 0..1 above neutral
+        arc_mult, arc_floor, _climax = self._arc_now
+        lift = max(lift, arc_floor)              # a build arc is a sustained push
         neutral = calm < 0.06 and lift < 0.06 and not self._forced
-        keep = 1.0 - 0.8 * calm                  # hushing thins the texture...
-        vel_scale = (1.0 - 0.45 * calm) * (1.0 + 0.5 * lift)   # ...and everything breathes
+        thin_level = 0 if calm < 0.2 else (1 if calm < 0.6 else 2)
+        vel_scale = (1.0 - 0.45 * calm) * (1.0 + 0.35 * lift) * arc_mult
+
+        gen_line = None
         if neutral:
-            decision, choice, shift = None, None, 0
             self._last_choice = None
         else:
             bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
             cands = generate(bar, prev, self.song.key_root)
-            self._take_generated(idx, cands)
-            decision = self._decide(idx, cands)
-            choice, shift = decision.candidate, decision.semitones()
+            self._take_generated(idx, cands)     # prefetches "harmonize" for idx+2
+            gen_line = cands.get("generated")
+            self._decide(idx, cands)             # the trained policy + training rows
 
         events: list[NoteEvent] = []
         n = len(self._sections)
         solo = self._aim if any(s.section_id == self._aim for s in self._sections) else None
-        melody_sec = solo or SECTION_ALL
         for i, part in enumerate(self.song.parts):
             if self._part_map and i in self._part_map and any(
                     s.section_id == self._part_map[i] for s in self._sections):
                 sec = self._part_map[i]
             else:
                 sec = SECTION_ALL if n == 0 else self._sections[i % n].section_id
-            if part.is_melody and not solo:
-                melody_sec = sec
             if solo and sec != solo:
                 continue                         # isolation: only the aimed phone sounds
             raw = part.bars[idx % len(part.bars)]
-            if neutral or part.is_melody:
-                notes = raw if neutral else [(on, dur, m, min(1.0, v * vel_scale))
-                                             for (on, dur, m, v) in raw]
+            if neutral:
+                notes = raw
+            elif part.is_melody:
+                notes = [(on, dur, m, min(1.0, v * max(0.9, vel_scale)))
+                         for (on, dur, m, v) in raw]
             else:
-                notes = self._shape(raw, keep, vel_scale, shift, part.is_drum)
+                # Drums hush one level harder — a calm room drops toward the kick.
+                lvl = min(2, thin_level + 1) if (part.is_drum and thin_level) else thin_level
+                notes = [(on, dur, m, min(1.0, v * vel_scale))
+                         for (on, dur, m, v) in thin_grid(raw, lvl)]
             for (on, dur, midi, vel) in notes:
                 art = "drum" if part.is_drum else ("sustain" if dur >= 8 else "pluck")
                 # Drum-map pitches are identifiers, not pitches - never clamp/fold them.
@@ -441,22 +454,36 @@ class Conductor:
                                          dur * self.s16_ms, midi_out, max(0.12, vel), art,
                                          inst=part.instrument))
 
-        # The AI's melodic line joins only on a real push (earned, not a blip),
-        # fading in with the lift. Pad-style candidates never overlay — their
-        # triads snap to ONE estimated key and clash on modulating songs.
-        if (not neutral and lift > 0.25
-                and choice in ("contrary_motion", "delayed", "generated", "rhythmic_dense")):
-            lead_inst = next((p.instrument for p in self.song.parts if p.is_melody), "violin")
-            for (on, dur, midi, vel) in cands[choice]:
-                events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
-                                         dur * self.s16_ms, _clampmidi(midi + shift),
-                                         vel * 0.35 * lift + 0.1,
-                                         ART.get(choice, "pluck"), inst=lead_inst))
-        if self._arc_now[2]:                     # the arc lands: a crash on the downbeat
-            events.append(self._note(SECTION_ALL, bar_start, self.s16_ms * 2, 49, 0.95, "drum"))
-        log.info("bar %d arrangement: i=%.2f %s%s (%d parts -> %d sections)",
-                 idx, i9, "verbatim" if neutral else f"shape={choice}",
-                 f", solo={solo}" if solo else "", len(self.song.parts), n)
+        # HARMONY on a push: held, voice-led chords that re-strike only when the
+        # song's harmony changes. The trained model's line takes the seat when
+        # one landed (sanitized, so it can only be chord-tones-in-register);
+        # the deterministic theory below is the ever-present fallback.
+        if lift > 0.2:
+            chord = self._chords[idx % len(self._chords)]
+            pad_vel = PAD_VEL * (0.5 + 0.5 * lift)
+            if gen_line and lift > 0.25:
+                for (on, dur, midi, vel) in gen_line[:5]:
+                    events.append(self._note(SECTION_ALL, bar_start + on * self.s16_ms,
+                                             dur * self.s16_ms, midi, min(vel, pad_vel * 1.4),
+                                             "sustain", inst="viola"))
+                self._pad_until = idx
+            elif idx > self._pad_until or self._chords[(idx - 1) % len(self._chords)] != chord:
+                span = chord_span(self._chords, idx % len(self._chords))
+                self._pad_voices = voice_lead(self._pad_voices, triad(*chord))
+                dur_ms = span * self.bar_ms * 0.98
+                for v in self._pad_voices:
+                    events.append(self._note(SECTION_ALL, bar_start, dur_ms, v,
+                                             pad_vel, "sustain", inst="viola"))
+                events.append(self._note(SECTION_ALL, bar_start, dur_ms, 36 + chord[0],
+                                         ROOT_VEL * (0.5 + 0.5 * lift), "sustain", inst="cello"))
+                self._pad_until = idx + span - 1
+        else:
+            self._pad_until = -1                 # released: next push re-voices fresh
+
+        log.info("bar %d arrangement: i=%.2f %s (%d parts -> %d sections)%s",
+                 idx, i9,
+                 "verbatim" if neutral else ("hush" if calm >= lift else "harmony"),
+                 len(self.song.parts), n, f", solo={solo}" if solo else "")
         return events
 
     def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str,

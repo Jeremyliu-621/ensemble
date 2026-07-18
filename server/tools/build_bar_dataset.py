@@ -25,6 +25,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))  # server/ on path
 
 from engine import candidates as C
+from engine.harmony import PAD_VEL, ROOT_VEL, voice_lead
 from engine.song import BarData
 from engine.theory import scale_notes, triad
 from ml.barmodel import sanitize_line
@@ -32,9 +33,19 @@ from ml.schema import bar_prompt_for, build_bar_context
 
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
+
+def harmonize(bar: BarData, prev: BarData, key: int) -> list:
+    """The approved treatment: the bar's chord as a held, voice-led pad + root.
+    THE style the model must master — chord theory, from the listening tests."""
+    notes = [(0, 16, v, PAD_VEL) for v in voice_lead(None, bar.chord_pcs)]
+    notes.append((0, 16, 48 + bar.chord_root, ROOT_VEL))
+    return notes
+
+
 # style -> the rule-based generator whose output teaches it (also used by
 # tools/mock_model.py to impersonate the trained model)
 STYLE_GEN = {
+    "harmonize": harmonize,
     "dense": C.rhythmic_dense,
     "calm": C.sustained,
     "counter": C.contrary_motion,

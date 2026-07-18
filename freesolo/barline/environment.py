@@ -70,6 +70,15 @@ def _style_score(rows: list, context: dict) -> float:
     style = context.get("style", "free")
     n = len(rows)
     mean_dur = sum(r[1] for r in rows) / n
+    if style == "harmonize":                 # THE style: chord tones, held, few
+        ch = context.get("chord") or {}
+        root = int(ch.get("root", 0))
+        pcs = {(root + o) % 12 for o in ((0, 3, 7) if ch.get("minor") else (0, 4, 7))}
+        in_chord = sum(1 for r in rows if int(r[2]) % 12 in pcs) / n
+        long_frac = sum(1 for r in rows if r[1] >= 8) / n
+        if in_chord >= 0.75 and long_frac >= 0.6 and n <= 5:
+            return 1.0
+        return 0.4 if in_chord >= 0.5 else 0.1
     if style == "dense":
         return 1.0 if (n >= 5 and mean_dur <= 3) else 0.3
     if style == "calm":

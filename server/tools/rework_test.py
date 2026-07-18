@@ -87,21 +87,21 @@ def units() -> None:
     c.on_classified("nonsense", 1.0, 500.0)      # unknown label: ignored, no crash
     print("    sharp_up -> features + sting queued; unknown label ignored")
 
-    print("[3c] a swell gesture arms a 4-bar rising climax")
+    print("[3c] a swell gesture builds: crescendo + the harmony layer joins")
     c = loaded_conductor()
     c._gesture_in(GestureFeatures(energy=0.6, size=0.5, vertical=0.8, duration=1.2), 400.0)
     assert c._arc == 4, c._arc
-    vels, crash = [], False
+    vels, pads = [], False
     for _ in range(4):
         s = c._next_bar_start
         ev = c.get_events(s, s)
         body = [e.vel for e in ev if e.dur > 100 and e.art != "drum"]
         vels.append(sum(body) / max(1, len(body)))
-        crash = crash or any(e.art == "drum" and e.note == "C#3" and e.vel == 0.95 for e in ev)
+        pads = pads or any(e.inst == "viola" and e.art == "sustain" for e in ev)
     assert vels[-1] > vels[0], f"no crescendo: {vels}"
-    assert crash, "climax crash missing"
+    assert pads, "harmony pad layer missing during the build"
     assert c._arc == 0
-    print(f"    mean velocities {[round(v, 2) for v in vels]} -> crash landed ✓")
+    print(f"    mean velocities {[round(v, 2) for v in vels]} + voice-led pads ✓")
 
     print("[4] arranger JSON parsing: fences, prose, dupes, leftovers")
     resp = {"content": 'Sure!\n```json\n{"s1": [0, 2], "s2": [1, 1], "sX": [9]}\n```'}
