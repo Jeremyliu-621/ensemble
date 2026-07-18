@@ -8,11 +8,15 @@ const BACKOFF_START = 500;
 const BACKOFF_MAX = 4000;
 
 export class Conn {
-  constructor({ role, session, name = "" }) {
+  constructor({ role, session, name = "", key = null }) {
     this.role = role;
     this.session = session;
     this.name = name;
-    this.clientId = localStorage.getItem(`wm.clientId.${role}`) || null;
+    // Distinct storage key per logical client, so two connections of the same
+    // role in one tab (e.g. the stage + its overlay) don't share a client-id and
+    // clobber each other in the server registry.
+    this._key = key || role;
+    this.clientId = localStorage.getItem(`wm.clientId.${this._key}`) || null;
     this.ws = null;
     this.welcome = null;
     this._handlers = new Map();     // type -> fn(msg)
@@ -60,7 +64,7 @@ export class Conn {
       if (msg.t === WELCOME) {
         this.welcome = msg;
         this.clientId = msg.client_id;
-        localStorage.setItem(`wm.clientId.${this.role}`, msg.client_id);
+        localStorage.setItem(`wm.clientId.${this._key}`, msg.client_id);
         if (this._onOpen) this._onOpen(msg);
         return;
       }

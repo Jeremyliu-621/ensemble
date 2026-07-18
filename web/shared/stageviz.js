@@ -50,7 +50,7 @@ const banner = document.createElement("div"); banner.id = "sv-banner";
 document.body.append(stream, tag, nowEl, banner);
 
 // --- ws + clock (read-only) ---
-const conn = new Conn({ role: "stage", session });
+const conn = new Conn({ role: "stage", session, key: "stageviz" });
 const clock = new Clock((o) => conn.send(o));
 conn.on(P.CLOCK_PONG, (m) => clock.handlePong(m));
 

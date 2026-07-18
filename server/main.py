@@ -155,14 +155,15 @@ class App:
             self.session.wand = WandSlot(connected=True, variant=variant)
             log.info("wand connected (variant=%s)", variant)
         elif role in ("stage", "admin"):
-            # The stage QR points at a single /join/ choice page (HTTPS on :8443 —
-            # DeviceMotion for the wand needs a secure context; sections work there
-            # too). The phone then picks "Conduct" (wand) or "Be an instrument"
-            # (section). `wand_url` is the key the stage QR reads.
-            base = f"https://{self.lan_ip}:{HTTPS_PORT}"
-            config["wand_url"] = f"{base}/join/?s={self.session.name}"
-            config["cv_url"] = f"http://{self.lan_ip}:{HTTP_PORT}/cvwand/"
-            config["join_url"] = f"{base}/join/?s={self.session.name}"
+            # Phone wand is parked for now, so the stage QR means "join as an
+            # instrument" — over plain http (no secure context / cert warning
+            # needed for audio). `wand_url` is the key the stage QR reads.
+            # (To re-enable the wand later, point this at https://.../join/ — the
+            # choice page still exists.)
+            http_base = f"http://{self.lan_ip}:{HTTP_PORT}"
+            config["wand_url"] = f"{http_base}/section/?s={self.session.name}"
+            config["join_url"] = f"{http_base}/section/?s={self.session.name}"
+            config["cv_url"] = f"{http_base}/cvwand/"
             config["lan_ip"] = self.lan_ip
 
         await send_json(ws, {
