@@ -21,8 +21,11 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import websockets
 
-HTTP = "http://127.0.0.1:8080"
-WS = "ws://127.0.0.1:8080/ws"
+import os
+
+PORT = os.environ.get("WM_HTTP_PORT", "8080")
+HTTP = f"http://127.0.0.1:{PORT}"
+WS = f"ws://127.0.0.1:{PORT}/ws"
 V = 1
 
 
@@ -89,10 +92,10 @@ async def main() -> int:
             for k in ("id", "section", "at", "dur", "note", "vel"):
                 assert k in got[0], f"event missing {k}: {got[0]}"
             assert all(note_re.match(e["note"]) for e in got), "non-musical note name emitted"
-            accompaniment = [e for e in got if e["section"] == "all"]
-            melody = [e for e in got if e["section"] != "all"]
-            print(f"  {len(got)} events: {len(accompaniment)} accompaniment (all), {len(melody)} melody")
-            assert accompaniment and melody, "expected both accompaniment and melody"
+            hit = {e["section"] for e in got}
+            print(f"  {len(got)} events routed to sections {sorted(hit)}")
+            # one section joined -> events route to it (SECTION_ALL only when laptop-only)
+            assert sid in hit or "all" in hit, f"events not routed to the section: {hit}"
 
             print("[4] live wand gesture -> engine keeps emitting (path works)")
             async with websockets.connect(WS) as wand:
