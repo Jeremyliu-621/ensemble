@@ -92,29 +92,28 @@ ASSETS: dict[str, tuple] = {
               "tip trailing sparkles, a single isolated object, plain background",
               96, 160, True, None, False),
 
-    # Front-facing, full-body musicians (transparent; placed in a flat row).
-    "violin":  ("a cute cartoon musician standing upright facing straight forward, playing a violin, "
-                "full body head to toe, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "cello":   ("a cute cartoon musician standing upright facing straight forward, playing a cello, "
-                "full body head to toe, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "flute":   ("a cute cartoon musician standing upright facing straight forward, playing a flute, "
-                "full body head to toe, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "trumpet": ("a cute cartoon musician standing upright facing straight forward, playing a trumpet, "
-                "full body head to toe, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "drums":   ("a cute cartoon musician standing facing straight forward behind a small drum kit, "
-                "full body, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "piano":   ("a cute cartoon musician standing facing straight forward at a keyboard piano, "
-                "full body, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "harp":    ("a cute cartoon musician standing upright facing straight forward, playing a harp, "
-                "full body head to toe, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
-    "synth":   ("a cute cartoon musician standing facing straight forward at a neon synthesizer keyboard, "
-                "full body, symmetrical, isolated on a plain flat background", 128, 176, True, None, False),
+    # Elegant, formally-dressed musicians — front-facing, full body, placed in a
+    # row on the lavish stage (the ornate SUFFIX makes them match the scenery).
+    "violin":  ("an elegant orchestra violinist in a black formal tailcoat playing a violin, "
+                "standing facing forward, full body head to toe, symmetrical, plain background", 128, 176, True, None, False),
+    "cello":   ("an elegant orchestra cellist in a flowing formal gown playing a cello, "
+                "standing facing forward, full body head to toe, symmetrical, plain background", 128, 176, True, None, False),
+    "flute":   ("an elegant orchestra flutist in formal concert attire playing a flute, "
+                "standing facing forward, full body head to toe, symmetrical, plain background", 128, 176, True, None, False),
+    "trumpet": ("an elegant orchestra trumpeter in a formal tailcoat playing a trumpet, "
+                "standing facing forward, full body head to toe, symmetrical, plain background", 128, 176, True, None, False),
+    "drums":   ("an elegant percussionist in formal concert attire at a drum, standing facing "
+                "forward, full body, symmetrical, plain background", 128, 176, True, None, False),
+    "piano":   ("an elegant pianist in formal concert attire standing at a grand piano keyboard, "
+                "facing forward, full body, symmetrical, plain background", 128, 176, True, None, False),
+    "harp":    ("an elegant harpist in a flowing formal gown playing a golden harp, standing facing "
+                "forward, full body head to toe, symmetrical, plain background", 128, 176, True, None, False),
+    "synth":   ("an elegant musician in formal concert attire playing an ornate keyboard, standing "
+                "facing forward, full body, symmetrical, plain background", 128, 176, True, None, False),
 
-    # Wand + note VFX.
-    "wand": ("a magic wand with a five-point star tip and little sparkles, single object, "
-             "isolated on a plain flat background", 96, 128, True, None, False),
-    "note": ("a single golden eighth music note, single object, isolated on a plain flat background",
-             64, 64, True, None, False),
+    # Note VFX (glowing, ornate — matches the sparkle & wand).
+    "note": ("a glowing golden ornate musical note with soft sparkles, a single isolated object, "
+             "plain black background", 64, 64, True, None, False),
 }
 
 

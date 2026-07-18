@@ -6,15 +6,17 @@
   <meta name="theme-color" content="#0b0d12">
   <title>Wand Maestro — How it works</title>
   <style>
-    :root { --bg:#05060a; --card:#140f0a; --line:#3a2c1a; --ink:#f4e9d6; --dim:#a99274; --acc:#ffd76a; --grn:#46d17a; --amb:#e5a23d; }
+    :root { --bg:#0c0608; --card:#190a0e; --line:#4a2530; --ink:#f6e7c9; --dim:#b9903f; --acc:#e7c583; --grn:#6fcf7f; --amb:#e5a23d;
+      --serif:"Cinzel","Bodoni MT","Playfair Display",Georgia,serif; --sans:"Segoe UI",system-ui,sans-serif; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: ui-monospace, "Courier New", monospace; background:
-      radial-gradient(circle at 50% -10%, #1a1206, #05060a 60%) fixed; color: var(--ink); line-height: 1.55; }
+    body { font-family: var(--sans); background:
+      radial-gradient(120% 90% at 50% -10%, #2a0d12, #0c0608 58%) fixed; color: var(--ink); line-height: 1.55; }
     img { image-rendering: pixelated; }
     .wrap { max-width: 860px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
-    h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); letter-spacing: -0.02em; }
+    h1 { font-family: var(--serif); color: var(--acc); font-size: clamp(1.9rem, 5vw, 2.7rem); letter-spacing: 0.06em;
+      text-shadow: 0 0 12px rgba(255,178,76,.35); }
     .lede { color: var(--dim); font-size: 1.1rem; margin-top: 0.5rem; }
-    h2 { font-size: 1.3rem; margin: 2.75rem 0 0.5rem; }
+    h2 { font-family: var(--serif); font-size: 1.35rem; letter-spacing: 0.05em; margin: 2.75rem 0 0.5rem; }
     h2 .n { color: var(--acc); font-variant-numeric: tabular-nums; margin-right: 0.4rem; }
     p { margin: 0.6rem 0; color: #cdd6e6; }
     b, strong { color: var(--ink); }

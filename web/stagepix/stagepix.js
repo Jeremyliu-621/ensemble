@@ -41,21 +41,25 @@ function positionScene() {
   const W = wrap.clientWidth, H = wrap.clientHeight;
   if (!H) return;
   const n = performers.length || 1;
-  const spanL = 8, spanR = 92;                 // % of stage width used by the row
+  const spanL = 10, spanR = 90;                // % of stage width used by the row
   const slot = (spanR - spanL) / n;            // width of each performer's slot (%)
-  let wPx = Math.min(0.16 * W, (slot * 0.86 / 100) * W);   // sprite width, capped
+  let wPx = Math.min(0.15 * W, (slot * 0.9 / 100) * W);    // sprite width, capped
   let hPx = wPx / SPRITE_AR;
-  const maxH = 0.46 * H;                        // don't let a lone musician get huge
+  const maxH = 0.40 * H;                        // don't let a lone musician get huge
   if (hPx > maxH) { hPx = maxH; wPx = hPx * SPRITE_AR; }
   performers.forEach((p, i) => {
     const x = spanL + slot * (i + 0.5);        // centre of the slot
     const node = p.node;
     node.style.left = x + "%";
-    node.style.top = "82%";                     // feet on the floor line
-    node.style.zIndex = 10 + i;
+    node.style.top = "84%";                     // feet on the floor line
+    node.style.zIndex = 12 + i;
     node.querySelector(".sprite").style.height = hPx + "px";
   });
-  el("wand").style.height = (0.13 * H) + "px";
+  // Ornaments sized from the stage height so everything scales as one.
+  el("wand").style.height = (0.16 * H) + "px";
+  el("podium").style.height = (0.15 * H) + "px";
+  el("chandelier").style.height = (0.20 * H) + "px";
+  document.querySelectorAll(".beam").forEach((b) => { b.style.height = (0.72 * H) + "px"; });
 }
 window.addEventListener("resize", positionScene);
 
@@ -131,6 +135,36 @@ function spawnPulse(p, vel) {
   setTimeout(() => img.remove(), 800);
 }
 
+// --- ambient sparkle + a gentle (never flashy) beat response ----------------
+function makeSparkle(xPct, yPct, sizePx, durMs) {
+  const img = document.createElement("img");
+  img.src = "../assets/sparkle.png";
+  img.className = "sparkle-fx";
+  img.style.left = xPct + "%";
+  img.style.top = yPct + "%";
+  img.style.width = sizePx + "px";
+  img.style.animationDuration = durMs + "ms";
+  el("fx").appendChild(img);
+  setTimeout(() => img.remove(), durMs);
+}
+function burstSparkles(count) {
+  for (let i = 0; i < count; i++) {
+    makeSparkle(16 + Math.random() * 68, 34 + Math.random() * 44,
+                9 + Math.random() * 13, 700 + Math.random() * 500);
+  }
+}
+let lastBeatFx = 0;
+function stageBeat() {
+  const now = performance.now();
+  if (now - lastBeatFx < 110) return;          // throttle dense bars
+  lastBeatFx = now;
+  const fl = el("footlights");
+  fl.classList.add("beat");
+  setTimeout(() => fl.classList.remove("beat"), 130);
+  burstSparkles(2);
+}
+function revealStage() { el("stagewrap").classList.add("reveal"); }
+
 function targetsFor(section) {
   if (section === P.SECTION_ALL) return performers;
   const p = performers.find((x) => x.id === section);
@@ -147,7 +181,10 @@ function visualize(ev) {
   if (clock && clock.theta !== null) {
     delay = Math.max(0, Math.min(1500, ev.at - clock.serverNow()));
   }
-  setTimeout(() => targets.forEach((t) => bump(t, ev.vel)), delay);
+  setTimeout(() => {
+    targets.forEach((t) => bump(t, ev.vel));
+    if (ev.section === P.SECTION_ALL) stageBeat();   // whole-room beat → gentle flourish
+  }, delay);
 }
 
 // --- roster / QR ------------------------------------------------------------
@@ -205,6 +242,7 @@ conn.onClose(() => { el("status").textContent = "reconnecting…"; });
 // Start splash: unlock audio (user gesture) + begin transport.
 el("splash").addEventListener("click", async () => {
   el("splash").style.display = "none";
+  setTimeout(revealStage, 300);                // raise the curtain on the show
   try {
     await synth.unlock();
     clock.attachAudio(synth.ctx);
@@ -216,6 +254,12 @@ el("splash").addEventListener("click", async () => {
 el("start2").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "start" }));
 el("stop").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "stop" }));
 el("panic").addEventListener("click", () => conn.send({ t: P.ADMIN_CMD, cmd: "allnotesoff" }));
+el("introbtn").addEventListener("click", (e) => {
+  e.preventDefault();
+  el("stagewrap").classList.remove("reveal");
+  setTimeout(revealStage, 450);                // replay the curtain-raise
+});
+setInterval(() => burstSparkles(1), 1500);     // gentle ambient shimmer
 
 // --- embedded webcam-wand dock ----------------------------------------------
 // The hand-tracking conductor (../cvwand/) runs in an iframe so you can conduct
@@ -243,10 +287,12 @@ if (demoN) {
     id: `s${i + 1}`, instrument: "synth", connected: true, ready: true, theta: 0,
   })));
   el("count").textContent = demoN;
+  el("splash").style.display = "none";
+  setTimeout(revealStage, 700);                // auto curtain-raise for preview
   let beat = 0;
   setInterval(() => {
-    // On-beat: whole ensemble; off-beats: a random performer — just to show motion.
-    if (beat % 2 === 0) performers.forEach((p) => bump(p, 0.9));
+    // On-beat: whole ensemble + a stage flourish; off-beats: a random performer.
+    if (beat % 2 === 0) { performers.forEach((p) => bump(p, 0.9)); stageBeat(); }
     else bump(performers[Math.floor(performers.length * (beat % 7) / 7)], 0.7);
     beat++;
   }, 500);

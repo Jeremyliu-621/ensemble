@@ -6,7 +6,7 @@
   <title>Wand Maestro — CV Wand</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; font-family: ui-monospace, "Courier New", monospace; background: #05060a; color: #f4e9d6; overflow: hidden; }
+    html, body { height: 100%; font-family: ui-monospace, "Courier New", monospace; background: #0c0608; color: #f6e7c9; overflow: hidden; }
     #wrap { position: fixed; inset: 0; display: flex; flex-direction: column; }
     #view { position: relative; flex: 1; background: #000; overflow: hidden; }
     #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; visibility: hidden; }
@@ -14,19 +14,19 @@
     #start {
       position: absolute; inset: 0; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 0.75rem; cursor: pointer;
-      background: radial-gradient(circle at 50% 40%, #1a1206, #05060a); z-index: 5;
+      background: radial-gradient(circle at 50% 40%, #1a1206, #0c0608); z-index: 5;
     }
-    #start h1 { font-size: clamp(1.8rem, 8vw, 3rem); font-weight: 800; letter-spacing: -0.02em; color: #ffd76a; text-shadow: 0 2px 0 #7a4a12; }
+    #start h1 { font-size: clamp(1.8rem, 8vw, 3rem); font-weight: 800; letter-spacing: -0.02em; color: #e7c583; text-shadow: 0 2px 0 #7a4a12; }
     #start p { opacity: 0.6; max-width: 32ch; text-align: center; line-height: 1.4; }
     #loading { position: absolute; top: 1rem; left: 50%; transform: translateX(-50%);
                background: #0009; padding: 0.4rem 0.9rem; border-radius: 999px; font: 13px ui-monospace, monospace; z-index: 4; }
     #hud { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.25rem 1rem;
-           padding: 0.6rem 1rem; background: #05060a; border-top: 1px solid #3a2c1a; font: 12px ui-monospace, monospace; }
+           padding: 0.6rem 1rem; background: #0c0608; border-top: 1px solid #3a2c1a; font: 12px ui-monospace, monospace; }
     #hud .k { opacity: 0.5; }
     #hud .grabbed { color: #46d17a; font-weight: 700; }
     #controls { display: flex; gap: 0.5rem; padding: 0.5rem 1rem 0.9rem; background: #05070b; }
     #controls button { flex: 1; font: 700 13px ui-monospace, monospace; padding: 0.7rem 0.5rem; border: 0;
-                       border-radius: 8px; background: #2a2016; color: #f4e9d6; cursor: pointer; }
+                       border-radius: 8px; background: #2a2016; color: #f6e7c9; cursor: pointer; }
     #controls button:active { transform: translateY(1px); }
     #controls .up { background: #2f8f56; } #controls .down { background: #8f3030; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; }

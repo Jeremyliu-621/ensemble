@@ -166,7 +166,7 @@ function draw(landmarks) {
     for (let i = 1; i < trail.length; i++) {
       const a = trail[i - 1], b = trail[i];
       const on = b.grabbed;
-      ctx.strokeStyle = on ? "rgba(70,209,122,0.9)" : "rgba(255,215,106,0.35)";
+      ctx.strokeStyle = on ? "rgba(70,209,122,0.9)" : "rgba(231,197,131,0.35)";
       ctx.lineWidth = on ? 10 * (i / trail.length) : 3;
       ctx.beginPath(); ctx.moveTo(a.xm * w, a.y * h); ctx.lineTo(b.xm * w, b.y * h); ctx.stroke();
     }
@@ -178,7 +178,7 @@ function draw(landmarks) {
     // fingertip marker + grab ring
     const tip = landmarks[INDEX_TIP];
     ctx.beginPath(); ctx.arc(MX(tip), MY(tip), grabbed ? 16 : 8, 0, 6.3);
-    ctx.fillStyle = grabbed ? "rgba(70,209,122,0.85)" : "rgba(255,215,106,0.85)"; ctx.fill();
+    ctx.fillStyle = grabbed ? "rgba(70,209,122,0.85)" : "rgba(231,197,131,0.85)"; ctx.fill();
   }
 }
 

@@ -21,7 +21,7 @@ let myId = null;
 let noteCount = 0;
 
 function onPlay(ev, peak) {
-  pulse.style.background = peak >= 0.9 ? "#ffd76a" : "#b5792a";
+  pulse.style.background = peak >= 0.9 ? "#e7c583" : "#a8712a";
   pulse.textContent = ev.note;
   setTimeout(() => { pulse.style.background = "transparent"; pulse.textContent = "—"; }, 90);
   noteCount++;
