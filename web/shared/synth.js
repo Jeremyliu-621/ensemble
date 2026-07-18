@@ -82,7 +82,7 @@ export class Synth {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     await this.ctx.resume();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.22;          // headroom so stacked notes don't clip
+    this.master.gain.value = 0.3;           // headroom; the limiter catches peaks
     // Master tension filter: the wand's ToF proximity sweeps this closed for
     // build-ups (fx.tension). Wide open (18kHz) = inaudible by default.
     this.fx = this.ctx.createBiquadFilter();

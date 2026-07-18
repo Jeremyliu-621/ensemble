@@ -11,7 +11,7 @@ import itertools
 import logging
 import math
 
-from config import GESTURE_BARS, MIN_LEAD_MS
+from config import MIN_LEAD_MS
 from engine.candidates import ART, GENERATORS, generate
 from engine.song import builtin_song
 from engine.theory import midi_to_name, voice_triad
@@ -45,7 +45,14 @@ class Conductor:
         self._arc = 0                                   # bars left in a build arc (0 = none)
         self._arc_total = 4
         self._arc_now = (1.0, 0.0, False)               # this bar's (vel_mult, density_floor, climax)
-        self._gesture_bars_left = 0                     # gesture window: bars until back-to-normal
+        # The CONDUCTING ENVELOPE: a continuous intensity (0 hushed .. 1 full,
+        # 0.5 = the song exactly as written). Gestures push the target; the
+        # envelope chases it and both relax toward neutral over ~6-8 bars — so
+        # a wave swells the orchestra and it breathes back down, instead of an
+        # inserted "altered section". Drives density, dynamics, AND tempo.
+        self._intensity = 0.5
+        self._intensity_target = 0.5
+        self.base_bpm = self.bpm                        # the song's own tempo (rubato pivots here)
         self._model = RemoteModel()                     # trained policy (WM_MODEL_URL); optional
         self._barmodel = RemoteBarModel()               # trained line writer (WM_BARMODEL_URL)
         self._decision: Decision | None = None          # the policy's active answer, until the next gesture
@@ -69,7 +76,8 @@ class Conductor:
 
     # --- editor controls ---
     def set_tempo(self, bpm: float) -> None:
-        self.bpm = max(40.0, min(220.0, bpm))
+        self.base_bpm = max(40.0, min(220.0, bpm))
+        self.bpm = self.base_bpm
         self.bar_ms = 60_000.0 / self.bpm * 4
         self.s16_ms = self.bar_ms / 16
 
@@ -150,9 +158,11 @@ class Conductor:
 
     def _gesture_in(self, features: GestureFeatures, t_end_ms: float) -> None:
         self._gesture = features
-        self._gesture_bars_left = GESTURE_BARS   # a cue, not a permanent remix
-        log.info("gesture -> %s (window %d bars)",
-                 {k: round(v, 2) for k, v in features.as_dict().items()}, GESTURE_BARS)
+        # Push the conducting envelope: the gesture's vigor becomes the target
+        # intensity the orchestra chases (and then relaxes from).
+        self._intensity_target = max(0.0, min(1.0, 0.6 * features.energy + 0.4 * features.size))
+        log.info("gesture -> %s (intensity target %.2f)",
+                 {k: round(v, 2) for k, v in features.as_dict().items()}, self._intensity_target)
         # A SWELL (slow, sustained lift) arms a planned multi-bar arc: the next
         # bars ramp density + velocity and land on a climax crash. One decision,
         # deterministic execution — latency only gates when it starts, not how
@@ -285,14 +295,18 @@ class Conductor:
     # --- bar generation ---
     def _bar_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
         self._arc_now = self._arc_step()
-        # A gesture shapes a WINDOW of bars, then the song returns to normal.
-        if self._gesture is not None:
-            if self._gesture_bars_left <= 0:
-                self._gesture = None
-                self._decision = None
-                log.info("gesture window over — back to the regular song")
-            else:
-                self._gesture_bars_left -= 1
+        # Advance the conducting envelope one bar: chase the gesture's target,
+        # while the target itself relaxes toward neutral. ~2 bars to arrive,
+        # ~6-8 bars to breathe back — phrasing, not a step function.
+        self._intensity += (self._intensity_target - self._intensity) * 0.5
+        self._intensity_target += (0.5 - self._intensity_target) * 0.18
+        if abs(self._intensity - 0.5) < 0.03 and self._gesture is not None:
+            self._gesture = None                 # fully relaxed: the cue is over
+            self._decision = None
+        # Rubato: the tempo leans with the conductor (±6% around the song's own).
+        self.bpm = self.base_bpm * (1 + (self._intensity - 0.5) * 0.12)
+        self.bar_ms = 60_000.0 / self.bpm * 4
+        self.s16_ms = self.bar_ms / 16
         if self.song.parts:                      # a loaded MIDI: play its arrangement
             return self._arrangement_events(idx, bar_start)
         bar = self.song.bar(idx)
@@ -343,22 +357,15 @@ class Conductor:
                  idx, choice, decision.source, len(responder), shift, n)
         return events
 
-    # How much of each loaded-MIDI part survives, per chosen candidate class.
-    # This is how the conductor bends the ACTUAL arrangement, not just an overlay:
-    # rest thins to melody-only, sustained is a sparse pad, rhythmic_dense opens
-    # everything up.
-    _DENSITY = {"rest": 0.0, "sustained": 0.4, "delayed": 0.6, "lower_imitation": 0.8,
-                "contrary_motion": 0.8, "generated": 0.8, "rhythmic_dense": 1.0}
-
-    def _shape(self, notes: list, decision: Decision, is_drum: bool) -> list:
-        """Bend one part's bar to the conductor: candidate class sets density,
-        gesture energy drives velocity, the decision's octave shift moves the
-        register. Drums thin too (a calm room drops toward the kick) but never
-        transpose. Kept notes are the structurally strongest: long, loud, on-beat."""
-        keep = self._DENSITY.get(decision.candidate, 0.8)
+    def _shape(self, notes: list, keep: float, vel_scale: float, shift: int,
+               is_drum: bool) -> list:
+        """Bend one part's bar to the current envelope: `keep` is the fraction
+        of notes that survive (the structurally strongest: long, loud,
+        on-beat), `vel_scale` the dynamics, `shift` the register (never for
+        drums). The build arc's floor/multiplier ride on top."""
         arc_mult, arc_floor, _climax = self._arc_now
-        if arc_floor > 0.0:                      # a build arc overrides thinning upward
-            keep = max(keep, arc_floor)
+        keep = max(keep, arc_floor)
+        vel_scale *= arc_mult
         if keep <= 0.0 or not notes:
             return []
         if keep >= 1.0:
@@ -367,8 +374,8 @@ class Conductor:
             ranked = sorted(notes, key=lambda nt: nt[1] * 2 + nt[3] * 4 + (2 if nt[0] % 4 == 0 else 0),
                             reverse=True)
             kept = sorted(ranked[:max(1, round(len(notes) * keep))])
-        shift = 0 if is_drum else decision.semitones()
-        vel_scale = (0.75 + 0.45 * (self._gesture.energy if self._gesture else 0.0)) * arc_mult
+        if is_drum:
+            shift = 0
         return [(on, dur, midi + shift, min(1.0, vel * vel_scale))
                 for (on, dur, midi, vel) in kept]
 
@@ -383,17 +390,19 @@ class Conductor:
         log.info("part assignment: %s", mapping or "round-robin")
 
     def _arrangement_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
-        """Play a loaded MIDI's parts distributed across sections — bent to the
-        conductor via _shape (the melody part is the song's identity and plays
-        verbatim), plus the gesture layer riding on the lead. The LLM arranger's
-        part map routes parts when present; aiming the wand at a phone SOLOS it
-        (every other phone mutes for the bar). Drum parts play through the
-        synth's percussion voice (art="drum")."""
-        # NEUTRAL = VERBATIM. With no live gesture and no override, the loaded
-        # song plays exactly as written — no shaping, no overlay, no AI layer.
-        # A gesture opens a window (GESTURE_BARS) of conducted changes; when it
-        # closes, this path is what the audience hears again.
-        neutral = self._gesture is None and not self._forced
+        """Play a loaded MIDI's parts distributed across sections, continuously
+        bent by the conducting envelope. Intensity 0.5 = the file exactly as
+        written; below it the texture thins and hushes, above it the dynamics
+        open up and (at a real push) the AI's melodic line joins the lead —
+        every bar re-derived, so the whole thing breathes instead of stepping.
+        The LLM arranger's part map routes parts; aiming SOLOS a phone; drums
+        play the percussion voice and never transpose."""
+        i9 = self._intensity
+        calm = max(0.0, 0.5 - i9) * 2            # 0..1 below neutral
+        lift = max(0.0, i9 - 0.5) * 2            # 0..1 above neutral
+        neutral = calm < 0.06 and lift < 0.06 and not self._forced
+        keep = 1.0 - 0.8 * calm                  # hushing thins the texture...
+        vel_scale = (1.0 - 0.45 * calm) * (1.0 + 0.5 * lift)   # ...and everything breathes
         if neutral:
             decision, choice, shift = None, None, 0
             self._last_choice = None
@@ -419,7 +428,11 @@ class Conductor:
             if solo and sec != solo:
                 continue                         # isolation: only the aimed phone sounds
             raw = part.bars[idx % len(part.bars)]
-            notes = raw if (neutral or part.is_melody) else self._shape(raw, decision, part.is_drum)
+            if neutral or part.is_melody:
+                notes = raw if neutral else [(on, dur, m, min(1.0, v * vel_scale))
+                                             for (on, dur, m, v) in raw]
+            else:
+                notes = self._shape(raw, keep, vel_scale, shift, part.is_drum)
             for (on, dur, midi, vel) in notes:
                 art = "drum" if part.is_drum else ("sustain" if dur >= 8 else "pluck")
                 # Drum-map pitches are identifiers, not pitches - never clamp/fold them.
@@ -428,20 +441,22 @@ class Conductor:
                                          dur * self.s16_ms, midi_out, max(0.12, vel), art,
                                          inst=part.instrument))
 
-        # Overlay only the melodic candidate lines. Pad-style candidates (their
-        # triads snap to ONE estimated key) clash on real songs that modulate —
-        # calm/energy already express through the arrangement shaping itself.
-        if not neutral and choice in ("contrary_motion", "delayed", "generated", "rhythmic_dense"):
+        # The AI's melodic line joins only on a real push (earned, not a blip),
+        # fading in with the lift. Pad-style candidates never overlay — their
+        # triads snap to ONE estimated key and clash on modulating songs.
+        if (not neutral and lift > 0.25
+                and choice in ("contrary_motion", "delayed", "generated", "rhythmic_dense")):
             lead_inst = next((p.instrument for p in self.song.parts if p.is_melody), "violin")
             for (on, dur, midi, vel) in cands[choice]:
                 events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
-                                         dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.55,
+                                         dur * self.s16_ms, _clampmidi(midi + shift),
+                                         vel * 0.35 * lift + 0.1,
                                          ART.get(choice, "pluck"), inst=lead_inst))
         if self._arc_now[2]:                     # the arc lands: a crash on the downbeat
             events.append(self._note(SECTION_ALL, bar_start, self.s16_ms * 2, 49, 0.95, "drum"))
-        log.info("bar %d arrangement: %d parts -> %d sections, %s%s",
-                 idx, len(self.song.parts), n,
-                 "verbatim" if neutral else f"shape={choice}", f", solo={solo}" if solo else "")
+        log.info("bar %d arrangement: i=%.2f %s%s (%d parts -> %d sections)",
+                 idx, i9, "verbatim" if neutral else f"shape={choice}",
+                 f", solo={solo}" if solo else "", len(self.song.parts), n)
         return events
 
     def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str,
