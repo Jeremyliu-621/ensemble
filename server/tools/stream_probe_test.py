@@ -7,11 +7,17 @@ Run from the repository root:
 """
 from __future__ import annotations
 
+import asyncio
 import importlib.util
+import json
+import os
 import pathlib
 import subprocess
 import sys
 import unittest
+from unittest import mock
+
+from websockets.asyncio.server import serve
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SERVER = REPO / "server"
@@ -22,6 +28,8 @@ LAUNCHER = REPO / "firmware" / "uno_q" / "stream_probe" / "run_probe.sh"
 sys.path.insert(0, str(SERVER))
 
 from imu_telemetry import ImuTelemetry  # noqa: E402
+from main import App  # noqa: E402
+from network_address import address_score, format_url_host, websocket_url  # noqa: E402
 
 
 def _load(name: str, path: pathlib.Path):
@@ -181,6 +189,71 @@ class MonitorTests(unittest.TestCase):
         checks = monitor.evaluate_probe(snapshots, 30.0)
         self.assert_check(checks, "receive continuity", False)
 
+    def test_ipv6_loopback_endpoint_handshake(self) -> None:
+        async def exercise() -> None:
+            async def handler(ws) -> None:
+                hello = json.loads(await ws.recv())
+                await ws.send(json.dumps({
+                    "t": "welcome",
+                    "v": 1,
+                    "role": hello.get("role"),
+                    "client_id": "ipv6-test-client",
+                }))
+
+            try:
+                server = await serve(handler, "::1", 0)
+            except OSError as exc:
+                self.skipTest(f"IPv6 loopback unavailable: {exc}")
+            try:
+                port = server.sockets[0].getsockname()[1]
+                url = websocket_url("::1", port)
+                self.assertEqual(url, f"ws://[::1]:{port}/ws")
+                self.assertEqual(await monitor.check_server(url, "lol1"), 0)
+            finally:
+                server.close()
+                await server.wait_closed()
+
+        asyncio.run(exercise())
+
+
+class NetworkAddressTests(unittest.TestCase):
+    def test_url_hosts_bracket_ipv6_only(self) -> None:
+        self.assertEqual(format_url_host("192.168.1.42"), "192.168.1.42")
+        self.assertEqual(format_url_host("2605:8d80:440:7d4c::10"),
+                         "[2605:8d80:440:7d4c::10]")
+
+    def test_ipv6_override_is_not_scored_as_virtual(self) -> None:
+        self.assertGreater(address_score("2605:8d80:440:7d4c::10"), 0)
+        self.assertGreater(address_score("fd12:3456:789a::10"), 0)
+
+    def test_server_welcome_uses_bracketed_ipv6_urls(self) -> None:
+        class RecordingSocket:
+            def __init__(self) -> None:
+                self.messages: list[str] = []
+
+            async def send(self, payload: str) -> None:
+                self.messages.append(payload)
+
+            async def close(self) -> None:
+                pass
+
+        async def exercise() -> None:
+            with mock.patch.dict(os.environ, {"WM_LAN_IP": "2605:8d80:440:7d4c::10"}):
+                app = App()
+            ws = RecordingSocket()
+            await app._on_hello(ws, {
+                "t": "hello", "v": 1, "role": "admin", "client_id": "ipv6-admin",
+            }, "admin")
+            welcome = json.loads(ws.messages[0])
+            config = welcome["config"]
+            base = "http://[2605:8d80:440:7d4c::10]:8080"
+            self.assertEqual(config["wand_url"], f"{base}/section/?s=lol1")
+            self.assertEqual(config["join_url"], f"{base}/section/?s=lol1")
+            self.assertEqual(config["cv_url"], f"{base}/cvwand/")
+            self.assertEqual(config["lan_ip"], "2605:8d80:440:7d4c::10")
+
+        asyncio.run(exercise())
+
 
 class LauncherTests(unittest.TestCase):
     def test_shell_syntax(self) -> None:
@@ -196,15 +269,57 @@ class LauncherTests(unittest.TestCase):
         )
         self.assertIn("no local or remote state changed", result.stdout)
 
-    def test_dry_run_rejects_loopback(self) -> None:
-        result = subprocess.run(
-            [str(LAUNCHER), "--board", "arduino@uno-q.local",
-             "--server-ip", "127.0.0.1", "--dry-run"],
-            capture_output=True,
-            text=True,
+    def test_dry_run_formats_ipv4_and_ipv6_urls(self) -> None:
+        fixtures = (
+            ("192.168.1.42", "ws://192.168.1.42:8080/ws"),
+            ("2605:8d80:0440:7d4c:0000:0000:0000:0010",
+             "ws://[2605:8d80:440:7d4c::10]:8080/ws"),
         )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot be loopback", result.stderr)
+        for address, expected_url in fixtures:
+            with self.subTest(address=address):
+                result = subprocess.run(
+                    [str(LAUNCHER), "--board", "arduino@uno-q.local",
+                     "--server-ip", address, "--dry-run"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertIn(f"server:     {expected_url}", result.stdout)
+
+    def test_dry_run_rejects_loopback(self) -> None:
+        for address in ("127.0.0.1", "::1"):
+            with self.subTest(address=address):
+                result = subprocess.run(
+                    [str(LAUNCHER), "--board", "arduino@uno-q.local",
+                     "--server-ip", address, "--dry-run"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("cannot be loopback", result.stderr)
+
+    def test_dry_run_rejects_unreachable_address_classes(self) -> None:
+        fixtures = (
+            ("0.0.0.0", "cannot be unspecified"),
+            ("::", "cannot be unspecified"),
+            ("224.0.0.1", "cannot be multicast"),
+            ("ff02::1", "cannot be multicast"),
+            ("169.254.10.20", "unscoped link-local"),
+            ("fe80::1234", "unscoped link-local"),
+            ("fe80::1234%en0", "without an interface scope"),
+            ("not-an-ip", "bare numeric IPv4 or IPv6"),
+            ("[2605:8d80:440:7d4c::10]", "bare numeric IPv4 or IPv6"),
+        )
+        for address, expected in fixtures:
+            with self.subTest(address=address):
+                result = subprocess.run(
+                    [str(LAUNCHER), "--board", "arduino@uno-q.local",
+                     "--server-ip", address, "--dry-run"],
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected, result.stderr)
 
     def test_dry_run_rejects_zero_duration_and_invalid_board(self) -> None:
         for extra_args, expected in (

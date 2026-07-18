@@ -18,11 +18,11 @@ usage() {
     'Deploy and run the Phoneharmonic UNO Q IMU stream probe.' \
     '' \
     'Usage:' \
-    '  run_probe.sh --board USER@HOST --server-ip IPV4 [options]' \
+    '  run_probe.sh --board USER@HOST --server-ip ADDRESS [options]' \
     '' \
     'Required:' \
     '  --board USER@HOST    SSH destination for the UNO Q' \
-    '  --server-ip IPV4     Laptop LAN IPv4 address reachable by the UNO Q' \
+    '  --server-ip ADDRESS  Numeric laptop IPv4 or IPv6 address reachable by the UNO Q' \
     '' \
     'Options:' \
     '  --server-port PORT   Phoneharmonic WebSocket port (default: 8080)' \
@@ -36,11 +36,11 @@ usage() {
 # Deploy and run the Phoneharmonic UNO Q IMU stream probe.
 #
 # Usage:
-#   run_probe.sh --board USER@HOST --server-ip IPV4 [options]
+#   run_probe.sh --board USER@HOST --server-ip ADDRESS [options]
 #
 # Required:
 #   --board USER@HOST    SSH destination for the UNO Q
-#   --server-ip IPV4     Laptop LAN IPv4 address reachable by the UNO Q
+#   --server-ip ADDRESS  Numeric laptop IPv4 or IPv6 address reachable by the UNO Q
 #
 # Options:
 #   --server-port PORT   Phoneharmonic WebSocket port (default: 8080)
@@ -115,25 +115,26 @@ if [[ -z "$SESSION" || "$SESSION" == *$'\n'* ]]; then
   exit 2
 fi
 
-if [[ ! "$SERVER_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "--server-ip must be an IPv4 address" >&2
-  exit 2
+if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="$(command -v python3)"
+else
+  echo "python3 or $REPO_ROOT/.venv/bin/python is required" >&2
+  exit 1
 fi
-IFS='.' read -r ip_a ip_b ip_c ip_d <<<"$SERVER_IP"
-for octet in "$ip_a" "$ip_b" "$ip_c" "$ip_d"; do
-  if ((10#$octet > 255)); then
-    echo "--server-ip must be an IPv4 address" >&2
-    exit 2
-  fi
-done
-if ((10#$ip_a == 127)); then
-  echo "--server-ip cannot be loopback; the UNO Q cannot reach laptop 127.0.0.1" >&2
-  exit 2
+
+SERVER_IP="$("$PYTHON_BIN" "$REPO_ROOT/server/network_address.py" "$SERVER_IP")"
+if [[ "$SERVER_IP" == *:* ]]; then
+  URL_HOST="[$SERVER_IP]"
+else
+  URL_HOST="$SERVER_IP"
 fi
+WS_URL="ws://$URL_HOST:$SERVER_PORT/ws"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[dry-run] board:      $BOARD"
-  echo "[dry-run] server:     ws://$SERVER_IP:$SERVER_PORT/ws"
+  echo "[dry-run] server:     $WS_URL"
   echo "[dry-run] session:    $SESSION"
   echo "[dry-run] duration:   ${DURATION}s"
   echo "[dry-run] remote app: $REMOTE_APP"
@@ -147,27 +148,6 @@ for command_name in ssh scp; do
     exit 1
   fi
 done
-
-if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
-  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
-  PYTHON_BIN="$(command -v python3)"
-else
-  echo "python3 or $REPO_ROOT/.venv/bin/python is required" >&2
-  exit 1
-fi
-
-"$PYTHON_BIN" - "$SERVER_IP" <<'PY'
-import ipaddress
-import sys
-
-try:
-    address = ipaddress.IPv4Address(sys.argv[1])
-except ipaddress.AddressValueError as exc:
-    raise SystemExit(f"--server-ip must be an IPv4 address: {exc}")
-if address.is_loopback:
-    raise SystemExit("--server-ip cannot be loopback; the UNO Q cannot reach laptop 127.0.0.1")
-PY
 
 "$PYTHON_BIN" -c 'import mido, serial, websockets' || {
   echo "local Python is missing server dependencies; install server/requirements.txt" >&2
@@ -211,7 +191,7 @@ cp "$SCRIPT_DIR/python/main.py" "$SCRIPT_DIR/python/requirements.txt" "$STAGE_AP
 cp "$SCRIPT_DIR/sketch/sketch.ino" "$SCRIPT_DIR/sketch/sketch.yaml" "$STAGE_APP/sketch/"
 
 "$PYTHON_BIN" - "$STAGE_APP/python/probe_config.json" \
-  "ws://$SERVER_IP:$SERVER_PORT/ws" "$SESSION" <<'PY'
+  "$WS_URL" "$SESSION" <<'PY'
 import json
 import pathlib
 import sys
@@ -238,10 +218,10 @@ set -e
 
 case "$server_status" in
   0)
-    echo "[probe] reusing compatible Phoneharmonic server at ws://$SERVER_IP:$SERVER_PORT/ws"
+    echo "[probe] reusing compatible Phoneharmonic server at $WS_URL"
     ;;
   2)
-    echo "[probe] starting Phoneharmonic server at ws://$SERVER_IP:$SERVER_PORT/ws"
+    echo "[probe] starting Phoneharmonic server at $WS_URL"
     SERVER_LOG="$STAGE_DIR/server.log"
     (
       cd "$REPO_ROOT"
@@ -274,7 +254,7 @@ case "$server_status" in
     fi
     ;;
   3)
-    echo "a listener exists at ws://$SERVER_IP:$SERVER_PORT/ws but is not a compatible Phoneharmonic server" >&2
+    echo "a listener exists at $WS_URL but is not a compatible Phoneharmonic server" >&2
     exit 1
     ;;
   *)

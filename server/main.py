@@ -43,6 +43,7 @@ from engine.candidates import GENERATORS
 from engine.conductor import Conductor
 from hub import ClientConn, Hub, send_json
 from imu_telemetry import ImuTelemetry
+from network_address import address_score, format_url_host
 from recording.recorder import GestureRecorder
 from scheduler import Scheduler
 from session import Section, SessionState, WandSlot
@@ -57,28 +58,8 @@ log = logging.getLogger("main")
 
 
 def _ip_score(ip: str) -> int:
-    """Rank an IPv4 by how likely it is the real Wi-Fi/LAN address a phone on the
-    same network can reach. Home Wi-Fi (192.168) beats corporate (10), both beat
-    the Docker/WSL bridges (172.17/18) and Tailscale/CGNAT (100.64/10)."""
-    p = ip.split(".")
-    if len(p) != 4 or not all(x.isdigit() for x in p):
-        return -100
-    a, b = int(p[0]), int(p[1])
-    if ip.startswith("169.254."):     # link-local (no DHCP lease) — dead
-        return -60
-    if ip.startswith("127."):
-        return -55
-    if a == 172 and b in (17, 18):    # Docker / WSL bridge — never LAN-reachable
-        return -50
-    if a == 192 and b == 168:
-        return 100
-    if a == 10:
-        return 80
-    if a == 172 and 16 <= b <= 31:
-        return 60
-    if a == 100 and 64 <= b <= 127:   # CGNAT/hotspot/Tailscale — often the real Wi-Fi
-        return 40                     # ...so prefer it over Docker, below real LANs
-    return 20                         # a public/other IP: usable
+    """Rank an address by how likely it is reachable by LAN peers."""
+    return address_score(ip)
 
 
 def detect_lan_ip() -> str:
@@ -225,7 +206,7 @@ class App:
             # needed for audio). `wand_url` is the key the stage QR reads.
             # (To re-enable the wand later, point this at https://.../join/ — the
             # choice page still exists.)
-            http_base = f"http://{self.lan_ip}:{HTTP_PORT}"
+            http_base = f"http://{format_url_host(self.lan_ip)}:{HTTP_PORT}"
             config["wand_url"] = f"{http_base}/section/?s={self.session.name}"
             config["join_url"] = f"{http_base}/section/?s={self.session.name}"
             config["cv_url"] = f"{http_base}/cvwand/"
@@ -740,14 +721,15 @@ async def main() -> None:
     if _ip_score(app.lan_ip) <= 0:
         log.warning("  ^ that looks like a virtual/VPN interface (Docker/WSL/Tailscale), which")
         log.warning("    phones on your Wi-Fi CANNOT reach. Connect this machine to the same")
-        log.warning("    Wi-Fi as the phones, or start with:  WM_LAN_IP=192.168.x.x python server/main.py")
+        log.warning("    Wi-Fi as the phones, or start with:  WM_LAN_IP=<reachable-address> python server/main.py")
     log.info("open on this laptop:  http://localhost:%d/", HTTP_PORT)
-    log.info("stage/admin:  http://%s:%d/stage/?admin=1", app.lan_ip, HTTP_PORT)
-    log.info("section join: http://%s:%d/section/?s=%s", app.lan_ip, HTTP_PORT, DEFAULT_SESSION)
+    url_host = format_url_host(app.lan_ip)
+    log.info("stage/admin:  http://%s:%d/stage/?admin=1", url_host, HTTP_PORT)
+    log.info("section join: http://%s:%d/section/?s=%s", url_host, HTTP_PORT, DEFAULT_SESSION)
     asyncio.create_task(app.prune_loop())
 
     # host=None binds all interfaces (IPv4 + IPv6), so both localhost (::1 on
-    # Windows) and the LAN IPv4 reach the server.
+    # Windows) and LAN addresses from either family reach the server.
     # max_size: default 1MiB closes the socket on a big base64 MIDI upload (1009).
     max_frame = 16 * 2**20
     async with serve(app.handler, None, HTTP_PORT, process_request=app.process_request,
@@ -758,7 +740,7 @@ async def main() -> None:
                              process_request=app.process_request, ssl=ssl_ctx,
                              max_size=max_frame):
                 log.info("HTTPS/wss listening on :%d  (wand-sim: https://%s:%d/wandsim/)",
-                         HTTPS_PORT, app.lan_ip, HTTPS_PORT)
+                         HTTPS_PORT, url_host, HTTPS_PORT)
                 await asyncio.Future()
         else:
             log.warning("no certs in %s -> HTTPS/:%d disabled. "

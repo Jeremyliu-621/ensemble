@@ -20,6 +20,8 @@ from dataclasses import dataclass
 import websockets
 from websockets.asyncio.client import connect
 
+from network_address import websocket_url
+
 
 @dataclass(frozen=True)
 class ProbeSnapshot:
@@ -355,7 +357,10 @@ def main() -> int:
     if args.duration <= 0 or args.startup_timeout <= 0:
         parser.error("--duration and --startup-timeout must be positive")
 
-    url = f"ws://{args.ip}:{args.port}/ws"
+    try:
+        url = websocket_url(args.ip, args.port)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.check_server:
         return asyncio.run(check_server(url, args.session))
     if args.probe:
