@@ -1,0 +1,2 @@
+# Board-side (UNO Q Linux) deps. `arduino.app_utils` (Bridge) ships with App Lab.
+websockets>=12.0
