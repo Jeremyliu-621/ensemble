@@ -6,6 +6,7 @@ assignment, placement azimuths, and JSON persistence arrive with P2.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 
 from engine_api import SectionInfo
@@ -66,12 +67,64 @@ class SessionState:
         return sid
 
     def next_instrument(self) -> str:
-        """First instrument in the rotation not already in use (else wrap)."""
+        """Fallback for when NO song is loaded: first rotation instrument not
+        already in use (else wrap). With a song, use deal_instrument instead."""
         used = {s.instrument for s in self.sections.values()}
         for inst in INSTRUMENT_ROTATION:
             if inst not in used:
                 return inst
         return INSTRUMENT_ROTATION[len(self.sections) % len(INSTRUMENT_ROTATION)]
+
+    # ── instrument assignment: ONE authority for every path ─────────────────
+    # (join, rejoin, MIDI drop, live edit). Policy: a phone must always be an
+    # instrument the current song actually contains, transport running or not;
+    # extra phones double the least-covered part; existing valid assignments
+    # are never shuffled without cause (minimal moves).
+
+    def _live(self) -> list[Section]:
+        """Connected sections in join order (dicts preserve insertion order)."""
+        return [s for s in self.sections.values() if s.connected]
+
+    def deal_instrument(self, song_instruments: list[str] | None = None) -> str:
+        """Instrument for a JOINING phone: the song's least-covered part
+        (ties broken by part order), so it always matches a real track.
+        No loaded song -> the generic rotation."""
+        insts = list(dict.fromkeys(song_instruments or []))
+        if not insts:
+            return self.next_instrument()
+        counts = Counter(s.instrument for s in self._live())
+        return min(insts, key=lambda i: counts.get(i, 0))
+
+    def reconcile_instruments(self, song_instruments: list[str]) -> list[Section]:
+        """Re-align connected phones after the song changed, with minimal moves:
+        phones already on one of the song's instruments keep it; stale phones
+        (instrument not in the song) are re-dealt; then surplus doublings are
+        spread onto still-uncovered parts, newest phone first. Returns the
+        sections that changed so the caller can notify them. No song -> no-op."""
+        insts = list(dict.fromkeys(song_instruments))
+        if not insts:
+            return []
+        live = self._live()
+        changed: list[Section] = []
+
+        counts = lambda: Counter(s.instrument for s in live)  # noqa: E731
+
+        for s in live:                          # stale phones get a real part
+            if s.instrument not in insts:
+                c = counts()
+                s.instrument = min(insts, key=lambda i: c.get(i, 0))
+                changed.append(s)
+        while True:                             # spread doublings onto uncovered parts
+            c = counts()
+            uncovered = [i for i in insts if c.get(i, 0) == 0]
+            surplus = [s for s in reversed(live) if c.get(s.instrument, 0) >= 2]
+            if not uncovered or not surplus:
+                break
+            mover = surplus[0]
+            mover.instrument = uncovered[0]
+            if mover not in changed:
+                changed.append(mover)
+        return changed
 
     def place_section(self, section_id: str, px: float, py: float) -> Section | None:
         """Pin a section to a spot on the top-down seating map (manual placement),

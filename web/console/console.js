@@ -444,6 +444,10 @@ conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
 conn.onOpen((welcome) => {
   el("conndot").classList.add("ok");
   el("connlbl").textContent = "connected";
+  // A fresh server process restarts its note-id counter; stale "seen" ids would
+  // make the roll drop every new event while the audio path keeps playing.
+  seen.clear();
+  notes.length = 0;
   const cfg = welcome.config || {};
   const join = cfg.wand_url || cfg.join_url;
   if (join && window.qrcode) {

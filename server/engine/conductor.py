@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import secrets
 
 from engine.candidates import ART, GENERATORS, generate
 from engine.song import builtin_song
@@ -36,6 +37,10 @@ class Conductor:
         self._sections: list[SectionInfo] = []
         self._cancels: list[CancelSpec] = []
         self._ids = itertools.count(1)
+        # Clients dedupe sched.notes by event id (lookahead windows overlap). Ids
+        # must therefore stay unique ACROSS server restarts, or a tab that lives
+        # through a restart silently drops every "already seen" n1, n2, … again.
+        self._id_boot = secrets.token_hex(3)
         self._tracks: list[dict] = []                    # parts of a loaded MIDI (for the editor)
         self._reanchor = False                           # re-align the bar cursor on the next pull
         self._anchor_ms = 0.0                            # server-ms of bar 0 (drives the editor playhead)
@@ -70,6 +75,12 @@ class Conductor:
 
     def set_forced(self, candidate: str | None) -> None:
         self._forced = candidate if candidate and candidate != "auto" else None
+
+    def part_instruments(self) -> list[str]:
+        """Ordered non-drum instruments of the current song's parts (empty for
+        the built-in loop). Joining phones are dealt from THIS list so every
+        phone always matches a track the song actually contains."""
+        return [t["instrument"] for t in self._tracks if not t.get("is_drum")]
 
     def status(self) -> dict:
         tracks = self._tracks
@@ -262,7 +273,7 @@ class Conductor:
         return events
 
     def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str) -> NoteEvent:
-        return NoteEvent(id=f"n{next(self._ids)}", section=section, at=at, dur=dur,
+        return NoteEvent(id=f"n{self._id_boot}-{next(self._ids)}", section=section, at=at, dur=dur,
                          note=midi_to_name(midi), vel=round(vel, 3), art=art)
 
 

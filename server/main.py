@@ -184,20 +184,28 @@ class App:
             "server_time": server_time_ms(),
             "config": config,
         })
-        await self._broadcast_roster()
+        # Keep the engine's routing in lockstep with the roster from the very
+        # first hello (not just from SECTION_READY) — same single path as every
+        # other roster mutation.
+        await self._sections_changed()
         return conn
 
     def _bind_section(self, conn: ClientConn) -> Section:
         """Reuse an existing (possibly disconnected) section for this client_id,
-        else create a fresh one."""
+        else create a fresh one. Either way the phone ends up on an instrument
+        the current song actually contains (transport running or not)."""
+        insts = self.engine.part_instruments()
         for s in self.session.sections.values():
             if s.client_id == conn.client_id:
                 s.connected = True
+                if insts and s.instrument not in insts:   # song changed while away
+                    s.instrument = self.session.deal_instrument(insts)
+                    log.info("section %s re-dealt to %s on rejoin", s.section_id, s.instrument)
                 log.info("section %s rejoined as %s", s.section_id, conn.client_id[:8])
                 return s
         sid = self.session.new_section_id()
         section = Section(section_id=sid, client_id=conn.client_id,
-                          instrument=self.session.next_instrument())
+                          instrument=self.session.deal_instrument(insts))
         self.session.sections[sid] = section
         log.info("section %s created for %s (instrument=%s)", sid, conn.client_id[:8], section.instrument)
         return section
@@ -229,8 +237,7 @@ class App:
         if t == P.SECTION_READY:
             if conn.section_id and conn.section_id in self.session.sections:
                 self.session.sections[conn.section_id].ready = True
-                self.engine.on_sections_changed(self.session.engine_sections())
-                await self._broadcast_roster()
+                await self._sections_changed()
             return
 
         if t == P.SECTION_LEAVE:
@@ -310,6 +317,19 @@ class App:
                 self.recorder.stop()
         await self._broadcast_roster()
 
+    async def _sync_instruments_to_song(self) -> None:
+        """After ANY song change (MIDI drop or live edit): re-align phones to the
+        new parts (minimal moves — see session.reconcile_instruments), tell each
+        changed phone, and refresh routing. Never consults the transport state:
+        matching works the same whether the song has started or not."""
+        for section in self.session.reconcile_instruments(self.engine.part_instruments()):
+            log.info("section %s re-dealt to %s (song change)", section.section_id, section.instrument)
+            c = self.hub.get(section.client_id)
+            if c:
+                await send_json(c.ws, {"t": P.SECTION_CONFIG, "section_id": section.section_id,
+                                       "instrument": section.instrument})
+        await self._sections_changed()
+
     async def _load_song(self, conn: ClientConn, name: str, b64: str) -> None:
         from engine.midi_load import load_midi_bytes
         try:
@@ -317,22 +337,7 @@ class App:
             song, tracks = load_midi_bytes(data, name)
             self.engine.load_song(song, tracks)
             log.info("song loaded: %s (%d bars, %d parts)", song.name, len(song.bars), len(tracks))
-            # Auto-assign instruments so each phone becomes one of the MIDI's parts.
-            # More phones than parts? Extras DOUBLE existing parts round-robin —
-            # like several players sharing one orchestra section (the engine routes
-            # a part to every phone assigned to it, so doubled phones play in unison
-            # and should stand close together).
-            playable = [t for t in tracks if not t["is_drum"]]
-            ready = [s for s in self.session.sections.values() if s.connected]
-            for j, section in enumerate(ready):
-                if playable:
-                    section.instrument = playable[j % len(playable)]["instrument"]
-                    c = self.hub.get(section.client_id)
-                    if c:
-                        await send_json(c.ws, {"t": P.SECTION_CONFIG, "section_id": section.section_id,
-                                               "instrument": section.instrument})
-            self.engine.on_sections_changed(self.session.engine_sections())
-            await self._broadcast_roster()
+            await self._sync_instruments_to_song()
         except Exception as e:  # noqa: BLE001 - report parse failures to the uploader
             log.warning("midi load failed for %r: %s", name, e)
             await send_json(conn.ws, {"t": P.ERR, "code": "bad_midi", "msg": str(e)})
@@ -347,9 +352,8 @@ class App:
             name = song_json.get("name") or "edited"
             song, tracks = build_song_from_grid(parts, bpm, name)
             self.engine.update_song(song, tracks, reanchor=False)
-            self.engine.on_sections_changed(self.session.engine_sections())
             log.info("song edited: %s (%d bars, %d parts)", song.name, len(song.bars), len(tracks))
-            await self._broadcast_roster()
+            await self._sync_instruments_to_song()
         except Exception as e:  # noqa: BLE001 - report bad edits back to the editor
             log.warning("song edit failed: %s", e)
             await send_json(conn.ws, {"t": P.ERR, "code": "bad_edit", "msg": str(e)})
@@ -362,8 +366,7 @@ class App:
         sec = self.session.place_section(section_id, px, py)
         if sec:
             log.info("placed %s at (%.2f, %.2f) -> azimuth %.1f", section_id, sec.px, sec.py, sec.azimuth_deg)
-            self.engine.on_sections_changed(self.session.engine_sections())
-            await self._broadcast_roster()
+            await self._sections_changed()
 
     async def _assign_instrument(self, section_id: str, instrument: str) -> None:
         section = self.session.sections.get(section_id)
@@ -374,17 +377,19 @@ class App:
         if conn:
             await send_json(conn.ws, {"t": P.SECTION_CONFIG, "section_id": section_id,
                                       "instrument": instrument})
-        self.engine.on_sections_changed(self.session.engine_sections())
-        await self._broadcast_roster()
+        await self._sections_changed()
 
     async def _remove_section(self, section_id: str | None, why: str) -> None:
-        """Delete a section from the roster (explicit leave, or grace expired)."""
+        """Delete a section from the roster (explicit leave, or grace expired).
+        Deliberately NO instrument rebalance here: swapping a surviving phone's
+        timbre mid-performance is audible. The engine's index fallback keeps the
+        orphaned part sounding, and the next joiner is dealt the least-covered
+        part — coverage self-heals without disturbing anyone."""
         if not section_id or section_id not in self.session.sections:
             return
         sec = self.session.sections.pop(section_id)
         log.info("section %s removed (%s, was %s)", section_id, why, sec.instrument)
-        self.engine.on_sections_changed(self.session.engine_sections())
-        await self._broadcast_roster()
+        await self._sections_changed()
 
     async def _reap_later(self, section_id: str) -> None:
         """After the grace period, drop the section if its phone never came back."""
@@ -417,6 +422,12 @@ class App:
             asyncio.create_task(self._reap_later(conn.section_id))
         elif conn.role in P.WAND_ROLES:
             self.session.wand = WandSlot()
+        await self._broadcast_roster()
+
+    async def _sections_changed(self) -> None:
+        """The one way roster mutations become visible: push the new section
+        list into the engine's routing, then broadcast the roster."""
+        self.engine.on_sections_changed(self.session.engine_sections())
         await self._broadcast_roster()
 
     async def _broadcast_roster(self) -> None:
