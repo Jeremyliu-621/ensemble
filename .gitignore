@@ -21,6 +21,9 @@ freesolo/*/dataset/
 # Firmware secrets
 firmware/wand/config.h
 
+# UNO Q stream-probe: generated per-deployment (ws_url/session), never commit
+firmware/uno_q/stream_probe/python/probe_config.json
+
 # Retro Diffusion API token (secret — never commit; read by server/tools/gen_assets.py)
 server/tools/rd_token.txt
 .env
