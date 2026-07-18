@@ -286,16 +286,16 @@ class Conductor:
         return decision
 
     def _arr_style(self) -> str:
-        """Map the gesture onto the theory-device vocabulary (the composer
-        actions from the research catalog): twist=ANSWER (echo), big=ENERGIZE
-        (arpeggio), moderate push=GROUND (harmonize), light=EMBELLISH (passing)."""
+        """The ear-approved device vocabulary, ranked by the conductor's own
+        listening tests: harmonize and hush strongest, then arpeggio and
+        passing. (Echo was cut — sounded out of place.) Twist or a big wave =
+        ENERGIZE (arpeggio), moderate push = GROUND (harmonize), light touch =
+        EMBELLISH (passing)."""
         g = self._gesture
         if g is None:
             return "harmonize"
-        if g.rotation > 0.5:
-            return "echo"
         e = 0.6 * g.energy + 0.4 * g.size
-        if e > 0.7:
+        if g.rotation > 0.5 or e > 0.7:
             return "arpeggio"
         if e > 0.4:
             return "harmonize"

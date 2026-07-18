@@ -37,3 +37,8 @@ Theory-device model: the deep-researched catalog of diatonic composer devices
 (approach runs/glissandi, suspensions, passing tones, pedal points, ...) as
 new styles with generators + rewards. The keeper stays deployed until the new
 one beats it by ear AND by judge.
+
+Ear verdicts on the ship-now devices (2026-07-18, Zora's Domain renders):
+harmonize + hush strongest, arpeggio + passing good, **echo CUT** (sounded
+out of place even after the underlap fix — remains in the trained styles but
+is never invoked live).
