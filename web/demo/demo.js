@@ -39,6 +39,10 @@ el("song-zelda").addEventListener("click", () => {
   conn.send({ t: P.SONG_FILE, name: "zelda-fairy.mid" });
   log("loading Great Fairy Fountain…");
 });
+el("song-zora").addEventListener("click", () => {
+  conn.send({ t: P.SONG_FILE, name: "zora-domain.mid" });
+  log("loading Zora's Domain…");
+});
 el("song-canon").addEventListener("click", () => {
   conn.send({ t: P.SONG_FILE, name: "canon.mid" });
   log("loading Canon in D…");

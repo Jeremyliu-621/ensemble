@@ -11,6 +11,7 @@ import itertools
 import logging
 import math
 
+import config
 from config import MIN_LEAD_MS
 from engine.candidates import ART, GENERATORS, generate
 from engine.harmony import PAD_VEL, ROOT_VEL, bar_chords, chord_span, thin_grid, voice_lead
@@ -198,7 +199,7 @@ class Conductor:
         DRAMATIC motion (fast + short = a stab) gets a fortissimo two-octave
         chord sting with a crash; anything gentler gets a quick low-velocity
         flourish. The full musical response still lands at the bar line."""
-        if not self._playing:
+        if not self._playing or not config.PICKUP:
             return
         eighth = self.bar_ms / 8
         bar_start = self._next_bar_start - self.bar_ms

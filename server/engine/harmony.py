@@ -15,14 +15,44 @@ the model learns is byte-identical to what the fallback plays.
 """
 from __future__ import annotations
 
-from engine.theory import scale_pcs, snap_to_scale
+from engine.theory import MAJOR, scale_pcs, snap_to_scale, triad
 
 PAD_VEL = 0.24
 ROOT_VEL = 0.3
 
+# Diatonic triad qualities on each major-scale degree: I ii iii IV V vi.
+_DEGREES = [(0, False), (2, True), (4, True), (5, False), (7, False), (9, True)]
+
+# How much better a NEW chord must fit before we move off the current one —
+# harmony has inertia; melodies arpeggiate over held chords.
+_INERTIA = 1.35
+
+
+def _fit_chord(bar, key: int, prev: tuple[int, bool]) -> tuple[int, bool]:
+    """Best diatonic triad for this bar's melody, weighted by duration, with
+    a bias toward keeping the previous chord (catches infrequent changes
+    instead of churning on every downbeat)."""
+    weights: dict[int, float] = {}
+    for (_on, dur, m) in bar.melody:
+        pc = snap_to_scale(m, key) % 12
+        weights[pc] = weights.get(pc, 0.0) + dur
+    if not weights:
+        return prev
+    best, best_score = prev, -1.0
+    for off, minor in _DEGREES:
+        root = (key + off) % 12
+        pcs = set(triad(root, minor))
+        score = sum(w for pc, w in weights.items() if pc in pcs)
+        if (root, minor) == prev:
+            score *= _INERTIA
+        if score > best_score:
+            best, best_score = (root, minor), score
+    return best
+
 
 def bar_chords(song) -> list[tuple[int, bool]]:
-    """(root_pc, minor) per bar."""
+    """(root_pc, minor) per bar. Real harmony parts win; a bare melody is
+    harmonized by best-fit diatonic triads with inertia."""
     has_harmony = any(not p.is_melody and not p.is_drum for p in song.parts)
     out = []
     prev = (song.key_root, (song.key_root + 4) % 12 not in scale_pcs(song.key_root))
@@ -30,8 +60,7 @@ def bar_chords(song) -> list[tuple[int, bool]]:
         if has_harmony:
             prev = (bar.chord_root, bar.chord_minor)
         elif bar.melody:
-            root = snap_to_scale(bar.melody[0][2], song.key_root) % 12
-            prev = (root, (root + 4) % 12 not in scale_pcs(song.key_root))
+            prev = _fit_chord(bar, song.key_root, prev)
         out.append(prev)
     return out
 
