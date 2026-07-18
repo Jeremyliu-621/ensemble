@@ -68,6 +68,7 @@ class Conductor:
         self._ids = itertools.count(1)
         self._tracks: list[dict] = []                    # parts of a loaded MIDI (for the editor)
         self._reanchor = False                           # re-align the bar cursor on the next pull
+        self._device = "verbatim"                        # what the arrangement layer did last bar
 
     def load_song(self, song, tracks: list[dict] | None = None) -> None:
         self.song = song
@@ -105,6 +106,7 @@ class Conductor:
             "forced": self._forced or "auto",
             "last_choice": self._last_choice,
             "decision_source": self._last_source,
+            "device": self._device,
             "intensity": round(self._intensity, 3),
             "candidates": list(GENERATORS) + (["generated"] if self._barmodel.configured else []),
             "training_rows": self._datalog.rows,
@@ -147,7 +149,7 @@ class Conductor:
         "swish":      GestureFeatures(energy=0.7, size=0.7, duration=0.8),
         "twist":      GestureFeatures(energy=0.5, size=0.4, rotation=0.9, duration=0.7),
         "still":      GestureFeatures(energy=0.05, size=0.05, duration=1.0),
-        "flick":      GestureFeatures(energy=0.6, size=0.3, duration=0.3),
+        "flick":      GestureFeatures(energy=0.75, size=0.3, duration=0.3),
     }
 
     def on_gesture(self, window: GestureWindow) -> None:
@@ -165,11 +167,25 @@ class Conductor:
             vertical=preset.vertical, rotation=min(1.0, preset.rotation * s),
             duration=preset.duration), server_ms)
 
+    @staticmethod
+    def _is_stab(g: GestureFeatures | None) -> bool:
+        """Sharp AND short (<0.4s) = a stab. A half-second vigorous wave is a
+        push; every real flick (demo button, wand presets) is ~0.3s."""
+        return g is not None and g.energy > 0.65 and 0.0 < g.duration < 0.4
+
     def _gesture_in(self, features: GestureFeatures, t_end_ms: float) -> None:
         self._gesture = features
         # Push the conducting envelope: the gesture's vigor becomes the target
-        # intensity the orchestra chases (and then relaxes from).
-        self._intensity_target = max(0.0, min(1.0, 0.6 * features.energy + 0.4 * features.size))
+        # intensity the orchestra chases (and then relaxes from). Two shapes are
+        # special: a stab is an ACCENT — the sting fires but the envelope stays
+        # put, the arrangement shouldn't lurch. A twist carries its push in the
+        # wrist, not the arm — rotation lifts the target so the arpeggio it
+        # selects is actually audible (accel alone reads near-zero).
+        if not self._is_stab(features):
+            target = 0.6 * features.energy + 0.4 * features.size
+            if features.rotation > 0.5:
+                target = max(target, 0.5 + 0.35 * features.rotation)
+            self._intensity_target = max(0.0, min(1.0, target))
         log.info("gesture -> %s (intensity target %.2f)",
                  {k: round(v, 2) for k, v in features.as_dict().items()}, self._intensity_target)
         # A SWELL (slow, sustained lift) arms a planned multi-bar arc: the next
@@ -199,14 +215,17 @@ class Conductor:
         DRAMATIC motion (fast + short = a stab) gets a fortissimo two-octave
         chord sting with a crash; anything gentler gets a quick low-velocity
         flourish. The full musical response still lands at the bar line."""
-        if not self._playing or not config.PICKUP:
+        g = self._gesture
+        sting = self._is_stab(g)
+        # The sting IS the sharp flick's whole meaning, so it always fires; the
+        # every-gesture flourish is the part that annoyed and stays opt-in.
+        if not self._playing or not (sting or config.PICKUP):
             return
         eighth = self.bar_ms / 8
         bar_start = self._next_bar_start - self.bar_ms
         at = bar_start + math.ceil((t_end_ms + 60.0 - bar_start) / eighth) * eighth
         chord = self.song.bar(max(0, self._next_bar_idx - 1)).chord_pcs
-        g = self._gesture
-        if g is not None and g.energy > 0.65 and 0.0 < g.duration < 0.6:   # the sting
+        if sting:
             stab = voice_triad(chord, base=52) + voice_triad(chord, base=64)
             self._pickup = [(at, eighth, m, 0.95, "pluck") for m in stab]
             self._pickup.append((at, eighth, 49, 0.9, "drum"))             # crash
@@ -288,16 +307,20 @@ class Conductor:
     def _arr_style(self) -> str:
         """The ear-approved device vocabulary, ranked by the conductor's own
         listening tests: harmonize and hush strongest, then arpeggio and
-        passing. (Echo was cut — sounded out of place.) Twist or a big wave =
-        ENERGIZE (arpeggio), moderate push = GROUND (harmonize), light touch =
+        passing. (Echo was cut — sounded out of place.) Any device that ADDS
+        notes needs the envelope above neutral, so all three bands live in the
+        lift-reachable zone: twist or the biggest wave = ENERGIZE (arpeggio),
+        a firm push = GROUND (harmonize), the lightest push that still lifts =
         EMBELLISH (passing)."""
         g = self._gesture
         if g is None:
             return "harmonize"
-        e = 0.6 * g.energy + 0.4 * g.size
-        if g.rotation > 0.5 or e > 0.7:
+        if g.rotation > 0.5:
             return "arpeggio"
-        if e > 0.4:
+        e = 0.6 * g.energy + 0.4 * g.size
+        if e > 0.88:
+            return "arpeggio"
+        if e > 0.76:
             return "harmonize"
         return "passing"
 
@@ -479,7 +502,7 @@ class Conductor:
         if lift > 0.2:
             chord = self._chords[idx % len(self._chords)]
             pad_vel = PAD_VEL * (0.5 + 0.5 * lift)
-            if gen_line and lift > 0.25:
+            if gen_line and lift > 0.2:
                 gstyle = getattr(self, "_gen_style", "harmonize")
                 mel_inst = next((p.instrument for p in self.song.parts if p.is_melody), "violin")
                 solo_piece = len([p for p in self.song.parts if not p.is_drum]) <= 1
@@ -508,9 +531,18 @@ class Conductor:
         else:
             self._pad_until = -1                 # released: next push re-voices fresh
 
+        # The device readout the demo shows: what this bar ACTUALLY did.
+        if neutral:
+            self._device = "verbatim"
+        elif calm >= lift:
+            self._device = "hush"
+        elif lift > 0.2:
+            self._device = (f"{getattr(self, '_gen_style', 'harmonize')} · model"
+                            if gen_line else "harmonize · pad")
+        else:
+            self._device = "swelling"            # pushed, device engages next bar
         log.info("bar %d arrangement: i=%.2f %s (%d parts -> %d sections)%s",
-                 idx, i9,
-                 "verbatim" if neutral else ("hush" if calm >= lift else "harmony"),
+                 idx, i9, self._device,
                  len(self.song.parts), n, f", solo={solo}" if solo else "")
         return events
 
