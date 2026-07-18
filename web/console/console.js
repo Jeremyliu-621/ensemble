@@ -48,6 +48,9 @@ let transport = null;                // engine.transport for the bar position
 const cardEls = new Map();           // group key -> card element
 const secGroup = new Map();          // section id -> group key (for note pulses)
 const seeded = new Set();            // group keys we've auto-fanned once
+const posCache = new Map();          // group key -> {px, py, placed}: last known good
+                                     // position, so a roster without placement (old
+                                     // server, race) can never NaN the card/link
 const notes = [];                    // bottom-roll notes
 const seen = new Set();
 const secInstrument = new Map();     // section id -> instrument (roll colours)
@@ -86,9 +89,14 @@ function rebuildGroups() {
     secInstrument.set(s.id, s.instrument);
   }
   groups = [...byInst.entries()].map(([key, members]) => {
-    const lead = members.find((m) => m.placed) || members[0];
-    return { key, instrument: members[0].instrument, members,
-             px: lead.px, py: lead.py, placed: members.some((m) => m.placed) };
+    // Prefer the server's placement; fall back to the last position this client
+    // knew (seed or drag) so the card and its link never jump to (0,0).
+    const lead = members.find((m) => m.placed && Number.isFinite(m.px) && Number.isFinite(m.py));
+    const cached = posCache.get(key);
+    const px = lead ? lead.px : (cached ? cached.px : 0);
+    const py = lead ? lead.py : (cached ? cached.py : 0.9);
+    const placed = !!lead || !!(cached && cached.placed);
+    return { key, instrument: members[0].instrument, members, px, py, placed };
   });
 
   // Fan brand-new groups around the hub so every card starts somewhere sensible,
@@ -99,6 +107,7 @@ function rebuildGroups() {
     const a = (i / n) * 2 * Math.PI;                 // 0 = top of the map, clockwise
     g.px = 0.62 * Math.sin(a); g.py = 0.5 + 0.36 * Math.cos(a);
     seeded.add(g.key);
+    posCache.set(g.key, { px: g.px, py: g.py, placed: false });
     sendPlace(g);
   });
 }
@@ -176,6 +185,7 @@ function attachDrag(node, key) {
     const g = groups.find((x) => x.key === key);
     if (!g) return;
     g.px = pos.px; g.py = pos.py; g.placed = true;
+    posCache.set(key, { px: g.px, py: g.py, placed: true });
     node.classList.remove("ghost");
     const p = toScreen(g.px, g.py, r);
     node.style.left = p.x + "px"; node.style.top = p.y + "px";
