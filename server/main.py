@@ -259,14 +259,24 @@ class App:
             config.update(section_id=section.section_id, instrument=section.instrument)
         elif role in P.WAND_ROLES:
             variant = P.WAND_VARIANT[role]
-            self.session.wand = WandSlot(connected=True, variant=variant)
-            self._wand_client = client_id
-            self.imu_telemetry.reset()           # never mix diagnostics across wand owners
-            self._last_state_ms = 0.0
-            self.wand.reset()                   # a fresh wand must not inherit a stale grab
-            self.showlog.record("wand.connect", variant=variant)
-            self.announcer.poke("wand.connect", f"The conductor's wand just came alive ({variant}).")
-            log.info("wand connected (variant=%s)", variant)
+            # The physical wand outranks the camera: the console's hub camera
+            # auto-starts on every page load and would otherwise steal the slot
+            # from the board mid-rehearsal (its input then dies SILENTLY). A
+            # camera hello while a hardware wand owns the slot leaves it alone.
+            holder = self.hub.get(self._wand_client) if self._wand_client else None
+            if (role != "wand" and holder is not None and holder.role == "wand"
+                    and self._wand_client != client_id):
+                log.info("hardware wand keeps the slot; %s (%s) is a bystander",
+                         client_id[:8], role)
+            else:
+                self.session.wand = WandSlot(connected=True, variant=variant)
+                self._wand_client = client_id
+                self.imu_telemetry.reset()       # never mix diagnostics across wand owners
+                self._last_state_ms = 0.0
+                self.wand.reset()               # a fresh wand must not inherit a stale grab
+                self.showlog.record("wand.connect", variant=variant)
+                self.announcer.poke("wand.connect", f"The conductor's wand just came alive ({variant}).")
+                log.info("wand connected (variant=%s)", variant)
         elif role in ("stage", "admin"):
             # Phone wand is parked for now, so the console QR means "join as an
             # instrument" — over plain http (no secure context / cert warning
@@ -441,6 +451,7 @@ class App:
                 self.session.wand = WandSlot(connected=True, variant=P.WAND_VARIANT[conn.role])
                 self.wand.reset()
                 log.info("wand slot adopted by %s", conn.client_id[:8])
+                await self._broadcast_roster()   # the UI must see the wand come alive
             elif conn.client_id != self._wand_client:
                 return
 
