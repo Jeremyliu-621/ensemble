@@ -116,12 +116,40 @@ class Conductor:
     def on_sections_changed(self, sections: list[SectionInfo]) -> None:
         self._sections = [s for s in sections if s.ready]
 
+    # Preset feature vectors for on-wand TinyML labels: firmware that classifies
+    # locally can skip streaming a window and just name the motion. The label
+    # becomes the same 5-feature intent the raw path extracts, so both firmware
+    # styles drive the identical decision pipeline.
+    _CLASSIFIED = {
+        "sharp_up":   GestureFeatures(energy=0.9, size=0.7, vertical=0.9, duration=0.3),
+        "sharp_down": GestureFeatures(energy=0.9, size=0.7, vertical=-0.9, duration=0.3),
+        "swish":      GestureFeatures(energy=0.7, size=0.7, duration=0.8),
+        "twist":      GestureFeatures(energy=0.5, size=0.4, rotation=0.9, duration=0.7),
+        "still":      GestureFeatures(energy=0.05, size=0.05, duration=1.0),
+        "flick":      GestureFeatures(energy=0.6, size=0.3, duration=0.3),
+    }
+
     def on_gesture(self, window: GestureWindow) -> None:
-        self._gesture = extract_features(window)
-        log.info("gesture -> %s", {k: round(v, 2) for k, v in self._gesture.as_dict().items()})
+        self._gesture_in(extract_features(window), window.t_end_server_ms)
+
+    def on_classified(self, label: str, strength: float, server_ms: float) -> None:
+        """A TinyML-classified gesture from the wand itself (wand.gesture)."""
+        preset = self._CLASSIFIED.get(label)
+        if preset is None:
+            log.info("unknown classified gesture %r ignored", label)
+            return
+        s = max(0.2, min(1.5, strength or 1.0))
+        self._gesture_in(GestureFeatures(
+            energy=min(1.0, preset.energy * s), size=min(1.0, preset.size * s),
+            vertical=preset.vertical, rotation=min(1.0, preset.rotation * s),
+            duration=preset.duration), server_ms)
+
+    def _gesture_in(self, features: GestureFeatures, t_end_ms: float) -> None:
+        self._gesture = features
+        log.info("gesture -> %s", {k: round(v, 2) for k, v in features.as_dict().items()})
         self._decision = None                    # new intent — the model must re-decide
         self._model.request(self._context())
-        self._queue_pickup(window.t_end_server_ms)
+        self._queue_pickup(t_end_ms)
 
     def on_grab(self, kind: str, server_ms: float) -> None:
         pass  # grab edges could cut sustains; not needed for the slice

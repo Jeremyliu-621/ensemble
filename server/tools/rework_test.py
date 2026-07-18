@@ -78,6 +78,14 @@ def units() -> None:
     assert c._next_bar_idx == 4
     print("    6 -> 2 -> 0 -> 4")
 
+    print("[3b] on-wand TinyML labels drive the same pipeline as raw windows")
+    c = loaded_conductor()
+    c.on_classified("sharp_up", 1.0, 400.0)
+    assert c._gesture is not None and c._gesture.vertical == 0.9
+    assert c._pickup and c._pickup[0][3] == 0.95, "sharp_up should queue the sting"
+    c.on_classified("nonsense", 1.0, 500.0)      # unknown label: ignored, no crash
+    print("    sharp_up -> features + sting queued; unknown label ignored")
+
     print("[4] arranger JSON parsing: fences, prose, dupes, leftovers")
     resp = {"content": 'Sure!\n```json\n{"s1": [0, 2], "s2": [1, 1], "sX": [9]}\n```'}
     m = arranger._parse(resp, ["s1", "s2"], 4)

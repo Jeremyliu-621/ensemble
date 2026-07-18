@@ -13,6 +13,7 @@ export const WAND_RECAL = "wand.recal";
 export const WAND_TOUCH = "wand.touch";   // {pad, state} MPR121 pads (hw wand)
 export const WAND_RANGE = "wand.range";   // {mm} ToF distance (hw wand)
 export const WAND_MODE = "wand.mode";     // {mode: "ai"|"det"}
+export const WAND_GESTURE = "wand.gesture"; // {label, strength?} on-wand TinyML
 export const STAGE_PLACE = "stage.place";
 export const STAGE_ASSIGN = "stage.assign";
 export const STAGE_RECORD = "stage.record";  // {sha256, bytes, dur_s}

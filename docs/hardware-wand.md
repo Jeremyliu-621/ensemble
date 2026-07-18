@@ -33,6 +33,7 @@ the same wand. Latest wand to connect owns the single wand slot.
 | `wand.recal` | `{"tw": ms}` | on a button press | Zeroes the aiming yaw ("this way is forward") |
 | `wand.mode` | `{"mode": "ai"\|"det", "param": "pitch"\|"volume"\|"filter"?}` | on the physical toggle (cycle: ai → det:pitch → det:volume → det:filter → ai) | **ai**: grabs become gesture windows the AI composes from. **det**: pure coordinate control — the wand's tilt (no motion needed) streams the selected parameter to the aimed phone: pitch = scale-locked degrees, volume = gain sweep, filter = the room tension filter. Grabs are ignored in det |
 | `wand.feedback` | `{"value": 1\|-1}` | on thumbs pads | Weights the last musical decision in the training data |
+| `wand.gesture` | `{"label": "sharp_up"\|"sharp_down"\|"swish"\|"twist"\|"still"\|"flick", "strength"?: 0.2-1.5}` | OPTIONAL: if you run TinyML on the MCU | A pre-classified motion; the server maps it to the same intent features the raw path extracts. Use this *instead of* grab+imu gestures if on-wand classification is your thing — but keep streaming `wand.imu` regardless (aiming and det-mode need it) |
 
 Units and axis convention (MUST match — the server interprets, the wand only
 reports): `tw` = wand-local monotonic ms; `ax, ay, az` = accelerometer m/s²

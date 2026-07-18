@@ -357,6 +357,10 @@ class App:
         if t == P.WAND_FEEDBACK:
             self.engine.on_feedback(int(msg.get("value", 0)))
             return
+        if t == P.WAND_GESTURE:                 # on-wand TinyML: a pre-classified motion
+            self.engine.on_classified(str(msg.get("label", "")),
+                                      float(msg.get("strength", 1.0)), server_time_ms())
+            return
         if t == P.WAND_TOUCH:                   # MPR121 pads: 0-5 force a candidate
             await self._wand_touch(int(msg.get("pad", -1)), msg.get("state", ""))
             return

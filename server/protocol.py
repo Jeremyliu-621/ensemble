@@ -18,6 +18,7 @@ WAND_RECAL = "wand.recal"       # {tw}        zero the aiming yaw
 WAND_TOUCH = "wand.touch"       # {pad:0-11, state:"down"|"up"}  MPR121 pads: 0-5 force a candidate
 WAND_RANGE = "wand.range"       # {mm}        ToF distance -> proximity tension (fx.tension)
 WAND_MODE = "wand.mode"         # {mode:"ai"|"det"}  physical toggle: gestures compose vs continuous control
+WAND_GESTURE = "wand.gesture"   # {label, strength?}  on-wand TinyML classification (optional path)
 STAGE_PLACE = "stage.place"     # {section_id, azimuth_deg, pos:[x,y,z]}
 STAGE_ASSIGN = "stage.assign"   # {section_id, instrument}
 STAGE_RECORD = "stage.record"   # {sha256, bytes, dur_s}  finished room recording -> ledger
