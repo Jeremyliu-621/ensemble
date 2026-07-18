@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0c0608">
+  <title>Wand Maestro · Seating & Aim</title>
+  <style>
+    :root {
+      --serif: "Cinzel", "Bodoni MT", "Playfair Display", Georgia, serif;
+      --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --gold: #e7c583; --gold-hi: #ffe3a3; --gold-dim: #b9903f;
+      --cream: #f6e7c9; --line: #4a2530; --panel: #190a0e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: var(--sans); color: var(--cream);
+      background: radial-gradient(130% 100% at 50% -10%, #3a1017, #0c0608 58%) fixed;
+      display: flex; flex-direction: column; padding: 1rem 1.1rem 1.2rem; gap: .7rem; }
+
+    header { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem; }
+    h1 { font-family: var(--serif); color: var(--gold-hi); font-size: clamp(1.4rem, 4.5vw, 2rem);
+      letter-spacing: .05em; font-weight: 600; }
+    .sub { color: var(--gold-dim); font-size: .9rem; line-height: 1.4; max-width: 46ch; }
+    .status { margin-left: auto; color: var(--gold-dim); font-size: .82rem; border: 1px solid var(--line);
+      border-radius: 999px; padding: .2rem .7rem; white-space: nowrap; }
+    .status.ok { color: #46d17a; border-color: #2c6b42; }
+    a.back { color: var(--gold-dim); text-decoration: none; font-size: .82rem; }
+    a.back:hover { color: var(--gold); }
+
+    /* --- the top-down seating map --- */
+    #mapwrap { position: relative; flex: 1; min-height: 260px; border: 1px solid var(--line);
+      border-radius: 16px; overflow: hidden; touch-action: none;
+      background:
+        radial-gradient(120% 90% at 50% 108%, rgba(231,197,131,.10), transparent 60%),
+        repeating-linear-gradient(0deg, rgba(74,37,48,.35) 0 1px, transparent 1px 44px),
+        repeating-linear-gradient(90deg, rgba(74,37,48,.35) 0 1px, transparent 1px 44px),
+        linear-gradient(#140a0d, #0d0609); }
+    #guides { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    #pucks { position: absolute; inset: 0; }
+    #conductor { position: absolute; left: 50%; bottom: 2.5%; transform: translateX(-50%);
+      text-align: center; color: var(--gold); font-family: var(--serif); font-size: .82rem;
+      letter-spacing: .06em; pointer-events: none; }
+    #conductor .podium { font-size: 1.5rem; line-height: 1; }
+
+    .puck { position: absolute; transform: translate(-50%, -50%); width: 74px;
+      display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: grab;
+      user-select: none; touch-action: none; }
+    .puck:active { cursor: grabbing; }
+    .puck .disc { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center;
+      background: radial-gradient(circle at 34% 30%, #2a1116, #170a0e);
+      border: 2px solid var(--gold-dim); box-shadow: 0 4px 14px rgba(0,0,0,.5);
+      transition: transform .1s, border-color .15s, box-shadow .15s; }
+    .puck .disc img { width: 34px; height: 34px; object-fit: contain; image-rendering: pixelated; }
+    .puck .name { font-size: .72rem; color: var(--cream); letter-spacing: .03em; text-align: center;
+      max-width: 84px; line-height: 1.05; }
+    .puck .az { font-size: .64rem; color: var(--gold-dim); font-variant-numeric: tabular-nums; }
+    .puck.ghost .disc { border-style: dashed; opacity: .78; }
+    .puck.ghost .name::after { content: " · drag me"; color: var(--gold-dim); }
+    .puck.dropped .disc { border-color: #6a3b45; filter: grayscale(.6) brightness(.7); }
+    .puck.muted .disc { border-color: #7a4b52; opacity: .6; }
+    .puck.aimed .disc { border-color: var(--gold-hi); transform: scale(1.12);
+      box-shadow: 0 0 0 4px rgba(231,197,131,.18), 0 6px 20px rgba(0,0,0,.6); }
+    .puck.aimed .name { color: var(--gold-hi); }
+
+    /* --- control panel --- */
+    #panel { border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+      padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
+    #aimlabel { font-family: var(--serif); color: var(--gold); font-size: 1.05rem; letter-spacing: .04em; }
+    #aimlabel b { color: var(--gold-hi); }
+    #controls { display: flex; flex-wrap: wrap; align-items: center; gap: .9rem; }
+    #controls.hidden { display: none; }
+    #controls label { display: flex; align-items: center; gap: .5rem; color: var(--gold-dim);
+      font-size: .85rem; flex: 1; min-width: 180px; }
+    #controls input[type=range] { flex: 1; accent-color: var(--gold); }
+    button { font: inherit; font-size: .85rem; color: var(--cream); background: #230f14;
+      border: 1px solid var(--gold-dim); border-radius: 8px; padding: .4rem .9rem; cursor: pointer;
+      letter-spacing: .03em; }
+    button:hover { border-color: var(--gold); color: var(--gold-hi); }
+    button.on { background: #5a1c24; border-color: var(--gold); color: var(--gold-hi); }
+    #hint { color: var(--gold-dim); font-size: .82rem; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Seating &amp; Aim</h1>
+    <p class="sub">Drag each phone to where it really sits in the room. Tap one to conduct just that
+      instrument &mdash; that's the manual placement the wand's pointing reads.</p>
+    <span id="status" class="status">connecting…</span>
+  </header>
+
+  <div id="mapwrap">
+    <svg id="guides" preserveAspectRatio="none"></svg>
+    <div id="pucks"></div>
+    <div id="conductor"><div class="podium">🎼</div>you (the wand)</div>
+  </div>
+
+  <div id="panel">
+    <div id="aimlabel">Conducting: <b>the whole orchestra</b></div>
+    <div id="controls" class="hidden">
+      <label>Volume <input id="vol" type="range" min="0" max="100" value="100"></label>
+      <button id="mute">Mute</button>
+      <button id="all">↺ Conduct all</button>
+    </div>
+    <div id="hint">No phones yet — open the stage and scan its QR to add instruments, then arrange them here.</div>
+  </div>
+
+  <div style="text-align:center"><a class="back" href="../home/">← back to menu</a></div>
+
+  <script type="module" src="./place.js"></script>
+</body>
+</html>

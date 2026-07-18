@@ -252,8 +252,11 @@ class App:
         if t == P.SONG_EDIT:
             await self._apply_edit(conn, msg.get("song") or {})
             return
-        if t in (P.WAND_RECAL, P.STAGE_PLACE):
-            return  # aiming/placement wired in P5
+        if t == P.STAGE_PLACE:
+            await self._place_section(msg.get("section_id"), msg.get("px"), msg.get("py"))
+            return
+        if t == P.WAND_RECAL:
+            return  # yaw recal wired in P5
 
         log.debug("unhandled message type %r", t)
 
@@ -315,6 +318,34 @@ class App:
         except Exception as e:  # noqa: BLE001 - report parse failures to the uploader
             log.warning("midi load failed for %r: %s", name, e)
             await send_json(conn.ws, {"t": P.ERR, "code": "bad_midi", "msg": str(e)})
+
+    async def _apply_edit(self, conn: ClientConn, song_json: dict) -> None:
+        """Editor pushed hand-edited notes: rebuild the Song and swap it in WITHOUT
+        restarting playback (reanchor=False) so an edit lands on the next bar."""
+        from engine.midi_load import build_song_from_grid
+        try:
+            parts = song_json.get("parts") or []
+            bpm = float(song_json.get("bpm") or self.engine.bpm)
+            name = song_json.get("name") or "edited"
+            song, tracks = build_song_from_grid(parts, bpm, name)
+            self.engine.update_song(song, tracks, reanchor=False)
+            self.engine.on_sections_changed(self.session.engine_sections())
+            log.info("song edited: %s (%d bars, %d parts)", song.name, len(song.bars), len(tracks))
+            await self._broadcast_roster()
+        except Exception as e:  # noqa: BLE001 - report bad edits back to the editor
+            log.warning("song edit failed: %s", e)
+            await send_json(conn.ws, {"t": P.ERR, "code": "bad_edit", "msg": str(e)})
+
+    async def _place_section(self, section_id: str, px, py) -> None:
+        """User dragged a phone onto the seating map. Store its spot + azimuth so
+        the wand's yaw can later point at it, and refresh the stage."""
+        if section_id is None or px is None or py is None:
+            return
+        sec = self.session.place_section(section_id, px, py)
+        if sec:
+            log.info("placed %s at (%.2f, %.2f) -> azimuth %.1f", section_id, sec.px, sec.py, sec.azimuth_deg)
+            self.engine.on_sections_changed(self.session.engine_sections())
+            await self._broadcast_roster()
 
     async def _assign_instrument(self, section_id: str, instrument: str) -> None:
         section = self.session.sections.get(section_id)
