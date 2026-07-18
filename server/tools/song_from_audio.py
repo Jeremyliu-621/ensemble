@@ -33,31 +33,56 @@ PYBIN = pathlib.Path.home() / ".wm-transcribe" / "bin"
 
 
 def split_registers(src_path: pathlib.Path, dest: pathlib.Path) -> None:
-    """Split a one-track transcription into treble/mid/bass parts so the engine
-    sees an arrangement it can bend (a lone part would play verbatim)."""
+    """Split a one-track transcription into treble/mid/bass parts AND prune it:
+    per beat, per band, keep only the few longest-and-loudest notes. Raw
+    full-mix transcriptions are note spam; this keeps the musical skeleton so
+    the engine sees an arrangement it can bend, not a wall of noise."""
     src = mido.MidiFile(str(src_path))
     merged = mido.merge_tracks(src.tracks)
-    bands = [("Treble", 68, 127, 0), ("Mid", 50, 67, 1), ("Bass", 0, 49, 2)]
-    out = mido.MidiFile(ticks_per_beat=src.ticks_per_beat)
-    tracks = []
-    for (name, _lo, _hi, _ch) in bands:
+    tpb = src.ticks_per_beat
+
+    notes, open_, tempo_msgs, t = [], {}, [], 0
+    for msg in merged:
+        t += msg.time
+        if msg.type == "set_tempo":
+            tempo_msgs.append((t, msg.copy(time=0)))
+        elif msg.type == "note_on" and msg.velocity > 0:
+            open_.setdefault(msg.note, []).append((t, msg.velocity))
+        elif msg.type in ("note_off", "note_on"):
+            if open_.get(msg.note):
+                s, v = open_[msg.note].pop(0)
+                if t > s:
+                    notes.append((s, t, msg.note, v))
+
+    bands = [("Treble", 68, 127, 0, 3), ("Mid", 50, 67, 1, 2), ("Bass", 0, 49, 2, 2)]
+    kept = []
+    for (name, lo, hi, ch, cap) in bands:
+        by_beat: dict[int, list] = {}
+        for n in notes:
+            if lo <= n[2] <= hi:
+                by_beat.setdefault(n[0] // tpb, []).append(n)
+        for group in by_beat.values():
+            group.sort(key=lambda n: (n[1] - n[0]) * n[3], reverse=True)
+            kept.extend((ch,) + n for n in group[:cap])
+
+    out = mido.MidiFile(ticks_per_beat=tpb)
+    trks = {}
+    for (name, _lo, _hi, ch, _cap) in bands:
         tr = mido.MidiTrack()
         tr.append(mido.MetaMessage("track_name", name=name, time=0))
         out.tracks.append(tr)
-        tracks.append({"tr": tr, "last": 0})
-    t = 0
-    for msg in merged:
-        t += msg.time
-        if msg.type in ("note_on", "note_off"):
-            for (name, lo, hi, ch), st in zip(bands, tracks):
-                if lo <= msg.note <= hi:
-                    st["tr"].append(msg.copy(channel=ch, time=t - st["last"]))
-                    st["last"] = t
-                    break
-        elif msg.type == "set_tempo":
-            tracks[0]["tr"].append(msg.copy(time=t - tracks[0]["last"]))
-            tracks[0]["last"] = t
+        trks[ch] = {"tr": tr, "last": 0}
+    events = [(abs_t, 0, m) for (abs_t, m) in tempo_msgs]
+    for (ch, s, e, p, v) in kept:
+        events.append((s, ch, mido.Message("note_on", channel=ch, note=p, velocity=v, time=0)))
+        events.append((e, ch, mido.Message("note_off", channel=ch, note=p, velocity=0, time=0)))
+    events.sort(key=lambda x: x[0])
+    for (abs_t, ch, m) in events:
+        st = trks[ch]
+        st["tr"].append(m.copy(time=abs_t - st["last"]))
+        st["last"] = abs_t
     out.save(str(dest))
+    print(f"pruned {len(notes)} raw notes -> {len(kept)} kept")
 
 
 def main() -> int:
@@ -81,7 +106,12 @@ def main() -> int:
     print("transcribing (basic-pitch)…")
     onnx = (PYBIN.parent / "lib" / "python3.12" / "site-packages" / "basic_pitch"
             / "saved_models" / "icassp_2022" / "nmp.onnx")
+    # Strict thresholds: a full mix transcribed loosely becomes note spam
+    # (drums/reverb/vocal texture all read as phantom notes) — a wall of noise.
     subprocess.run([str(PYBIN / "basic-pitch"), "--model-path", str(onnx),
+                    "--onset-threshold", "0.7", "--frame-threshold", "0.5",
+                    "--minimum-note-length", "120",
+                    "--minimum-frequency", "65", "--maximum-frequency", "1500",
                     str(work), str(audio)], check=True)
     mid = next(work.glob("*.mid"))
     dest = out_dir / f"{args.name}.mid"

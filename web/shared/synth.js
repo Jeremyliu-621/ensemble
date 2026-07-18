@@ -54,8 +54,17 @@ export class Synth {
     this.fx = this.ctx.createBiquadFilter();
     this.fx.type = "lowpass";
     this.fx.frequency.value = 18000;
+    // Ear-safety limiter: dense material (busy MIDIs, transcriptions) can stack
+    // dozens of oscillators — the compressor stops that becoming a blare.
+    this.limiter = this.ctx.createDynamicsCompressor();
+    this.limiter.threshold.value = -18;
+    this.limiter.knee.value = 18;
+    this.limiter.ratio.value = 10;
+    this.limiter.attack.value = 0.003;
+    this.limiter.release.value = 0.25;
     this.master.connect(this.fx);
-    this.fx.connect(this.ctx.destination);
+    this.fx.connect(this.limiter);
+    this.limiter.connect(this.ctx.destination);
     // Silent one-sample buffer so iOS marks the context "running".
     const buf = this.ctx.createBuffer(1, 1, this.ctx.sampleRate);
     const src = this.ctx.createBufferSource();
@@ -73,7 +82,9 @@ export class Synth {
     const now = this.ctx.currentTime;
     if (when < now - 0.05) return;          // hopelessly late — drop
     const t = Math.max(when, now + 0.001);
-    const peak = Math.max(0.05, ev.vel || 0.7);
+    // Crowd control: the more voices already sounding, the quieter each new one.
+    const crowd = Math.min(1, 20 / (this.scheduled.length + 1));
+    const peak = Math.max(0.05, (ev.vel || 0.7) * crowd);
 
     if (ev.art === "drum") {                // percussion voice (GM-mapped by pitch)
       this._drum(noteToMidi(ev.note), t, peak);
