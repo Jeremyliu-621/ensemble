@@ -54,19 +54,21 @@ def _ip_score(ip: str) -> int:
     if len(p) != 4 or not all(x.isdigit() for x in p):
         return -100
     a, b = int(p[0]), int(p[1])
+    if ip.startswith("169.254."):     # link-local (no DHCP lease) — dead
+        return -60
     if ip.startswith("127."):
+        return -55
+    if a == 172 and b in (17, 18):    # Docker / WSL bridge — never LAN-reachable
         return -50
-    if a == 100 and 64 <= b <= 127:   # CGNAT / Tailscale — unreachable from LAN
-        return -40
-    if a == 172 and b in (17, 18):    # Docker / WSL virtual bridge
-        return -20
     if a == 192 and b == 168:
         return 100
     if a == 10:
         return 80
     if a == 172 and 16 <= b <= 31:
         return 60
-    return 0                          # a public/other IP: usable but not preferred
+    if a == 100 and 64 <= b <= 127:   # CGNAT/hotspot/Tailscale — often the real Wi-Fi
+        return 40                     # ...so prefer it over Docker, below real LANs
+    return 20                         # a public/other IP: usable
 
 
 def detect_lan_ip() -> str:
