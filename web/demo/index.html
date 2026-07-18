@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo — Wand Maestro</title>
+<style>
+  body { background: #0b0b0b; color: #ddd; font-family: ui-monospace, monospace;
+         margin: 0; padding: 22px; max-width: 860px; }
+  h2 { font-size: 13px; color: #777; letter-spacing: 2px; margin: 26px 0 8px; }
+  button { background: #191919; color: #ddd; border: 1px solid #444; border-radius: 8px;
+           padding: 14px 18px; font: inherit; font-size: 16px; cursor: pointer; margin: 3px; }
+  button:hover { border-color: #999; }
+  button.on { border-color: #e7c583; color: #e7c583; }
+  #choice { font-size: 56px; font-weight: bold; min-height: 70px; margin-top: 6px; }
+  #source { font-size: 20px; }
+  #source.model { color: #6fcf7f; } #source.heuristic { color: #e5a23d; }
+  #meta, #feat, #humstate { color: #888; font-size: 14px; }
+  #barwrap { height: 10px; background: #1a1a1a; border-radius: 5px; overflow: hidden; margin-top: 10px; }
+  #barpos { height: 100%; width: 0; background: #e7c583; }
+  #barcap { color: #666; font-size: 13px; margin-top: 4px; }
+  label { color: #999; font-size: 15px; margin-left: 10px; }
+  #log { color: #666; font-size: 13px; max-height: 140px; overflow-y: auto; margin-top: 20px; }
+</style>
+</head>
+<body>
+  <h2>1 · TRANSPORT</h2>
+  <button id="start">▶ START THE SHOW</button>
+  <button id="stop">⏹ stop</button>
+  <label><input type="checkbox" id="mute"> mute melody (isolate what the AI controls)</label>
+
+  <h2>2 · SONG (one click — no drag & drop)</h2>
+  <button id="song-canon">🎻 Canon in D (clean demo song)</button>
+  <button id="song-yt">📺 your YouTube song</button>
+
+  <h2>3 · CONDUCT (canned gestures — the wand sends exactly these)</h2>
+  <div id="gestures"></div>
+
+  <h2>4 · OR HUM THE NEXT MELODY</h2>
+  <button id="hum">🎤 hum a melody</button>
+  <span id="humstate"></span>
+
+  <h2>WHAT THE AI DECIDED</h2>
+  <div id="choice">—</div>
+  <div id="source">press start…</div>
+  <div id="feat"></div>
+  <div id="meta"></div>
+  <div id="barwrap"><div id="barpos"></div></div>
+  <div id="barcap"></div>
+
+  <div id="log"></div>
+  <script type="module" src="./demo.js"></script>
+</body>
+</html>

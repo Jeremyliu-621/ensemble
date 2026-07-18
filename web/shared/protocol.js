@@ -20,6 +20,7 @@ export const STAGE_RECORD = "stage.record";  // {sha256, bytes, dur_s}
 export const ADMIN_CMD = "admin.cmd";
 export const SONG_LOAD = "song.load";
 export const SONG_HUM = "song.hum";       // {frames: [[t_ms, midi_float, rms], ...]}
+export const SONG_FILE = "song.file";     // {name} load songs/<name>.mid server-side
 export const CLOCK_REPORT = "clock.report";
 
 // Server -> Client

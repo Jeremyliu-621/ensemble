@@ -25,6 +25,7 @@ STAGE_RECORD = "stage.record"   # {sha256, bytes, dur_s}  finished room recordin
 ADMIN_CMD = "admin.cmd"         # {cmd:"start"|"stop"|"clicktest"|"resync"|"allnotesoff"|"tempo"|"force", args?}
 SONG_LOAD = "song.load"         # {name, data}  data = base64 of a .mid file -> replaces the song
 SONG_HUM = "song.hum"           # {frames:[[t_ms, midi_float, rms], ...]}  hummed melody -> new song
+SONG_FILE = "song.file"         # {name}  load songs/<name>.mid from the server's disk
 CLOCK_REPORT = "clock.report"   # {theta, rtt}  section's own sync estimate (debug/health readout)
 
 # --- Server -> Client ---
