@@ -26,6 +26,32 @@ Find the laptop's WiFi IPv4 address with `ipconfig getifaddr en0` on macOS,
 `hostname -I` on Linux, or `ipconfig` on Windows. Do not use `127.0.0.1`: that
 would refer to the UNO Q itself when used by the board.
 
+For an IPv6 macOS hotspot, first confirm that the board is reachable over IPv6:
+
+```bash
+ssh -6 arduino@ArduinoUnoQ.local
+exit
+```
+
+Then list the Mac's assigned non-loopback, non-link-local IPv6 addresses and
+their interfaces:
+
+```bash
+ifconfig | awk '
+  /^[a-z0-9]/ { interface=$1; sub(/:$/, "", interface) }
+  /inet6 / {
+    address=tolower($2)
+    if (address != "::1" && address !~ /^fe80:/) print interface, $2
+  }
+'
+```
+
+Choose the global or unique-local address on the interface shared with the UNO
+Q. The hotspot interface may be `en0`, `en1`, or a bridge interface depending
+on the Mac and Internet Sharing configuration. Do not use a `fe80::` address:
+link-local addresses require receiver-specific interface scoping and are not
+suitable for the generated board URL.
+
 Close browser, simulator, and CV wand clients before testing. Phoneharmonic has
 one active wand slot, and the most recently connected wand owns it.
 
@@ -38,6 +64,19 @@ From any working directory, run:
   --board arduino@uno-q.local \
   --server-ip 192.168.1.42
 ```
+
+For IPv6, pass the bare address in quotes:
+
+```bash
+LAPTOP_IPV6='2605:8d80:440:7d4c::10'
+./firmware/uno_q/stream_probe/run_probe.sh \
+  --board arduino@ArduinoUnoQ.local \
+  --server-ip "$LAPTOP_IPV6"
+```
+
+Do not add square brackets to `--server-ip`. The launcher validates and
+canonicalizes the address, then adds the RFC-required brackets when it creates
+the URL: `ws://[2605:8d80:440:7d4c::10]:8080/ws`.
 
 The launcher copies only this isolated App to
 `/home/arduino/ArduinoApps/phoneharmonic-stream-probe`, compiles and flashes its
@@ -62,6 +101,50 @@ PASS requires a connected hardware wand, 45–70 sensor frames/s, 8–15 batches
 no invalid frames or sequence gaps, no receive pause over one second, gravity
 near 9.81 m/s², low gyro activity while still, and obvious yaw movement during
 the middle phase.
+
+## Expected successful run
+
+The launcher prints these milestones in order. Advancing from the access check
+to deployment confirms SSH and `arduino-app-cli`; an SSH error stops the run.
+
+```text
+[probe] checking UNO Q access: arduino@ArduinoUnoQ.local
+[probe] deploying isolated app to arduino@ArduinoUnoQ.local:...
+[probe] compiling, flashing, and starting the UNO Q app
+```
+
+It then either reuses a compatible server or starts one. For IPv6, every shown
+WebSocket URL should contain brackets:
+
+```text
+[probe] starting Phoneharmonic server at ws://[2605:8d80:440:7d4c::10]:8080/ws
+[probe] starting guided 30s physical test
+[probe] connecting to ws://[2605:8d80:440:7d4c::10]:8080/ws
+[probe] admin connected as 1a2b3c4d
+```
+
+The first `HOLD STILL` prompt appears only after the server roster reports a
+connected `variant=hw` wand. Seeing all three prompts confirms that deployment,
+the board WebSocket handshake, and the physical capture are in progress:
+
+```text
+[probe   0.0s] HOLD STILL: place the board flat and do not move it
+[probe   8.0s] MOVE: rotate the board clearly around its vertical/yaw axis
+[probe  20.0s] HOLD STILL AGAIN: stop moving the board
+```
+
+A successful physical test ends with every result row marked `PASS`, followed
+by:
+
+```text
+[probe] PASS
+[probe] hardware stream PASS
+```
+
+Without `--keep-running`, the final cleanup message confirms that the isolated
+board App was stopped. If the server cannot accept the IPv6 connection, verify
+that the Mac firewall permits inbound TCP on the selected port (default 8080)
+and that the chosen address belongs to the hotspot interface.
 
 ## Troubleshooting
 
