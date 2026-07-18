@@ -184,4 +184,8 @@ def load_midi_bytes(data: bytes, name: str = "uploaded") -> tuple[Song, list[dic
         pi["roll"] = roll
 
     song = Song(name=name, bpm=round(bpm, 1), key_root=key_root, bars=bars, parts=song_parts)
+    # Make the fitted harmony canonical: bare-melody files get their inertia-fit
+    # progression written into the bars, so arpeggios/candidates/pads all agree.
+    from engine.harmony import apply_chords
+    apply_chords(song)
     return song, part_info

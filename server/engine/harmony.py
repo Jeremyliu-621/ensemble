@@ -154,6 +154,20 @@ def echo(bar, prev, key: int) -> list:
     return out
 
 
+def apply_chords(song) -> list[tuple[int, bool]]:
+    """Write the fitted progression INTO the song's bars so every consumer
+    (pads, arpeggios, candidates, model context) sees the same harmony. On
+    files with real harmony parts this is an identity operation; on bare
+    melodies it replaces the loader's stale defaults with the inertia fit —
+    without this, bar-local generators arpeggiate one frozen chord forever."""
+    fitted = bar_chords(song)
+    for bar, (root, minor) in zip(song.bars, fitted):
+        bar.chord_root = root
+        bar.chord_minor = minor
+        bar.chord_pcs = triad(root, minor)
+    return fitted
+
+
 def chord_span(chords: list[tuple[int, bool]], idx: int, cap: int = 4) -> int:
     """Bars (up to cap) the chord at idx holds, including idx itself."""
     j = idx

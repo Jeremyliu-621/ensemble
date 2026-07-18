@@ -481,9 +481,13 @@ class Conductor:
             pad_vel = PAD_VEL * (0.5 + 0.5 * lift)
             if gen_line and lift > 0.25:
                 gstyle = getattr(self, "_gen_style", "harmonize")
-                inst = {"harmonize": "viola", "arpeggio": "harp", "echo": "flute",
-                        "passing": next((p.instrument for p in self.song.parts if p.is_melody),
-                                        "violin")}.get(gstyle, "viola")
+                mel_inst = next((p.instrument for p in self.song.parts if p.is_melody), "violin")
+                solo_piece = len([p for p in self.song.parts if not p.is_drum]) <= 1
+                # Ornaments (passing/echo) always ride the melody's own
+                # instrument; on a solo piece EVERY device speaks that
+                # instrument so nothing "comes out of nowhere".
+                inst = mel_inst if (solo_piece or gstyle in ("passing", "echo")) else \
+                    {"harmonize": "viola", "arpeggio": "harp"}.get(gstyle, "viola")
                 cap = 5 if gstyle == "harmonize" else 16
                 for (on, dur, midi, vel) in gen_line[:cap]:
                     art = "sustain" if dur >= 8 else "pluck"
