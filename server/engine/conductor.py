@@ -11,7 +11,7 @@ import itertools
 import logging
 import math
 
-from config import MIN_LEAD_MS
+from config import GESTURE_BARS, MIN_LEAD_MS
 from engine.candidates import ART, GENERATORS, generate
 from engine.song import builtin_song
 from engine.theory import midi_to_name, voice_triad
@@ -45,6 +45,7 @@ class Conductor:
         self._arc = 0                                   # bars left in a build arc (0 = none)
         self._arc_total = 4
         self._arc_now = (1.0, 0.0, False)               # this bar's (vel_mult, density_floor, climax)
+        self._gesture_bars_left = 0                     # gesture window: bars until back-to-normal
         self._model = RemoteModel()                     # trained policy (WM_MODEL_URL); optional
         self._barmodel = RemoteBarModel()               # trained line writer (WM_BARMODEL_URL)
         self._decision: Decision | None = None          # the policy's active answer, until the next gesture
@@ -149,7 +150,9 @@ class Conductor:
 
     def _gesture_in(self, features: GestureFeatures, t_end_ms: float) -> None:
         self._gesture = features
-        log.info("gesture -> %s", {k: round(v, 2) for k, v in features.as_dict().items()})
+        self._gesture_bars_left = GESTURE_BARS   # a cue, not a permanent remix
+        log.info("gesture -> %s (window %d bars)",
+                 {k: round(v, 2) for k, v in features.as_dict().items()}, GESTURE_BARS)
         # A SWELL (slow, sustained lift) arms a planned multi-bar arc: the next
         # bars ramp density + velocity and land on a climax crash. One decision,
         # deterministic execution — latency only gates when it starts, not how
@@ -282,6 +285,14 @@ class Conductor:
     # --- bar generation ---
     def _bar_events(self, idx: int, bar_start: float) -> list[NoteEvent]:
         self._arc_now = self._arc_step()
+        # A gesture shapes a WINDOW of bars, then the song returns to normal.
+        if self._gesture is not None:
+            if self._gesture_bars_left <= 0:
+                self._gesture = None
+                self._decision = None
+                log.info("gesture window over — back to the regular song")
+            else:
+                self._gesture_bars_left -= 1
         if self.song.parts:                      # a loaded MIDI: play its arrangement
             return self._arrangement_events(idx, bar_start)
         bar = self.song.bar(idx)
@@ -378,11 +389,20 @@ class Conductor:
         part map routes parts when present; aiming the wand at a phone SOLOS it
         (every other phone mutes for the bar). Drum parts play through the
         synth's percussion voice (art="drum")."""
-        bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
-        cands = generate(bar, prev, self.song.key_root)
-        self._take_generated(idx, cands)
-        decision = self._decide(idx, cands)
-        choice, shift = decision.candidate, decision.semitones()
+        # NEUTRAL = VERBATIM. With no live gesture and no override, the loaded
+        # song plays exactly as written — no shaping, no overlay, no AI layer.
+        # A gesture opens a window (GESTURE_BARS) of conducted changes; when it
+        # closes, this path is what the audience hears again.
+        neutral = self._gesture is None and not self._forced
+        if neutral:
+            decision, choice, shift = None, None, 0
+            self._last_choice = None
+        else:
+            bar, prev = self.song.bar(idx), self.song.bar(idx - 1)
+            cands = generate(bar, prev, self.song.key_root)
+            self._take_generated(idx, cands)
+            decision = self._decide(idx, cands)
+            choice, shift = decision.candidate, decision.semitones()
 
         events: list[NoteEvent] = []
         n = len(self._sections)
@@ -399,7 +419,7 @@ class Conductor:
             if solo and sec != solo:
                 continue                         # isolation: only the aimed phone sounds
             raw = part.bars[idx % len(part.bars)]
-            notes = raw if part.is_melody else self._shape(raw, decision, part.is_drum)
+            notes = raw if (neutral or part.is_melody) else self._shape(raw, decision, part.is_drum)
             for (on, dur, midi, vel) in notes:
                 art = "drum" if part.is_drum else ("sustain" if dur >= 8 else "pluck")
                 # Drum-map pitches are identifiers, not pitches - never clamp/fold them.
@@ -407,14 +427,16 @@ class Conductor:
                 events.append(self._note(sec, bar_start + on * self.s16_ms,
                                          dur * self.s16_ms, midi_out, max(0.12, vel), art))
 
-        for (on, dur, midi, vel) in cands[choice]:
-            events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
-                                     dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,
-                                     ART.get(choice, "pluck")))
+        if not neutral:
+            for (on, dur, midi, vel) in cands[choice]:
+                events.append(self._note(melody_sec, bar_start + on * self.s16_ms,
+                                         dur * self.s16_ms, _clampmidi(midi + shift), vel * 0.7,
+                                         ART.get(choice, "pluck")))
         if self._arc_now[2]:                     # the arc lands: a crash on the downbeat
             events.append(self._note(SECTION_ALL, bar_start, self.s16_ms * 2, 49, 0.95, "drum"))
-        log.info("bar %d arrangement: %d parts -> %d sections, shape=%s%s",
-                 idx, len(self.song.parts), n, choice, f", solo={solo}" if solo else "")
+        log.info("bar %d arrangement: %d parts -> %d sections, %s%s",
+                 idx, len(self.song.parts), n,
+                 "verbatim" if neutral else f"shape={choice}", f", solo={solo}" if solo else "")
         return events
 
     def _note(self, section: str, at: float, dur: float, midi: int, vel: float, art: str) -> NoteEvent:

@@ -25,6 +25,11 @@ SCHED_TICK_MS = 100.0     # how often the scheduler pulls from the engine and br
 LOOKAHEAD_MS = 600.0      # pull events up to now + this
 MIN_LEAD_MS = 150.0       # every emitted event must satisfy at >= now + this (else dropped + logged)
 
+# --- Gesture semantics ---
+# A gesture bends the song for this many bars, then it returns to normal —
+# a conductor's cue, not a permanent remix.
+GESTURE_BARS = int(os.environ.get("WM_GESTURE_BARS", "5"))
+
 # --- Metronome stub (P1) ---
 METRONOME_BPM = 120.0     # 120 BPM = one click every 500 ms (matches the clicktest cadence)
 METRONOME_BEATS_PER_BAR = 4

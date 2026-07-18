@@ -66,10 +66,12 @@ def split_registers(src_path: pathlib.Path, dest: pathlib.Path) -> None:
             kept.extend((ch,) + n for n in group[:cap])
 
     out = mido.MidiFile(ticks_per_beat=tpb)
+    programs = {0: 40, 1: 48, 2: 33}   # treble=violin, mid=strings, bass=bass
     trks = {}
     for (name, _lo, _hi, ch, _cap) in bands:
         tr = mido.MidiTrack()
         tr.append(mido.MetaMessage("track_name", name=name, time=0))
+        tr.append(mido.Message("program_change", channel=ch, program=programs[ch], time=0))
         out.tracks.append(tr)
         trks[ch] = {"tr": tr, "last": 0}
     events = [(abs_t, 0, m) for (abs_t, m) in tempo_msgs]

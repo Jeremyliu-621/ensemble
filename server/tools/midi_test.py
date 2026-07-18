@@ -76,6 +76,10 @@ def main() -> int:
     ev = c.get_events(s, s)
     notes = sorted(e.note for e in ev)
     assert ev, "loaded song produced no events"
+    # Neutral (no gesture) must be VERBATIM: exactly the file's notes for this
+    # bar (bar 1 here), no overlay, no shaping.
+    expected = sum(len(p.bars[1]) for p in song.parts)
+    assert len(ev) == expected, f"neutral must be verbatim: {len(ev)} != {expected}"
     print(f"    conductor status: song={c.status()['song']}, bars={c.status()['bars']}, playing")
     print(f"    a bar of events emitted: {len(ev)} notes")
 
