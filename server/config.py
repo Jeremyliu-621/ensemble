@@ -93,6 +93,10 @@ BARMODEL_KEY = os.environ.get("WM_BARMODEL_KEY", "")
 # prefetches two bars ahead to absorb it. A faster host (e.g. Parasail) can
 # tighten both this and the prefetch horizon.
 BARMODEL_TIMEOUT_MS = float(os.environ.get("WM_BARMODEL_TIMEOUT_MS", "7000"))
+# How many bars ahead composed lines are requested. 2 absorbs Freesolo's ~4.6s
+# median; a fast host (Fireworks dedicated: ~0.5s) can run at 1 so a gesture's
+# styled line lands at the NEXT bar line instead of the one after.
+BARMODEL_PREFETCH = max(1, int(os.environ.get("WM_BARMODEL_PREFETCH", "2")))
 # Styles the DEPLOYED adapter is trusted to speak (what it was trained AND
 # ear/judge-proven on). Styles outside this set are served by the deterministic
 # theory in engine/harmony.py instead — the same generators that teach the

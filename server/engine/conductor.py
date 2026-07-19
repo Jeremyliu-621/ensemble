@@ -365,14 +365,15 @@ class Conductor:
             cands["generated"] = taken[0]
             self._gen_style = taken[1]
         if self._barmodel.configured:
-            tgt, prev = self.song.bar(idx + 2), self.song.bar(idx + 1)
+            ahead = config.BARMODEL_PREFETCH   # 2 absorbs slow serving; 1 on a fast host
+            tgt, prev = self.song.bar(idx + ahead), self.song.bar(idx + ahead - 1)
             style = self._arr_style() if self.song.parts else style_for(self._gesture)
             # Never ask the deployed adapter for a style it wasn't trained on —
             # it would improvise something OFF-style and we'd play it under the
             # style's name. Out-of-list styles are deterministic (harmony.py).
             if style not in config.BARMODEL_STYLES:
                 style = "harmonize"
-            self._barmodel.prefetch(idx + 2, build_bar_context(
+            self._barmodel.prefetch(idx + ahead, build_bar_context(
                 key_root=self.song.key_root, bpm=self.bpm,
                 chord_root=tgt.chord_root, chord_minor=tgt.chord_minor,
                 style=style,

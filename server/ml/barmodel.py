@@ -145,4 +145,7 @@ class RemoteBarModel:
         })
         with urllib.request.urlopen(req, timeout=config.BARMODEL_TIMEOUT_MS / 1000.0) as resp:
             payload = json.loads(resp.read().decode())
-        return payload["choices"][0]["message"]["content"]
+        msg = payload["choices"][0]["message"]
+        # Hybrid-thinking serving (Fireworks qwen3_5 template) can route the
+        # whole answer into reasoning_content and leave content empty.
+        return msg.get("content") or msg.get("reasoning_content") or ""
