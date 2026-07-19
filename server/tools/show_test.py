@@ -190,6 +190,10 @@ def main() -> int:
     env = dict(os.environ)
     env.update({
         "WM_HTTP_PORT": str(PORT),
+        # certs/ may exist: the spawned server binds TLS too — move it off the
+        # live show server's 8443 (same fix as rework_test).
+        "WM_HTTPS_PORT": str(PORT + 1),
+        "WM_DISCOVERY_OFF": "1",
         "WM_DECISION_LOG": "0",
         "WM_SHOWS_DIR": shows_dir,
         "WM_SESSION_FILE": str(pathlib.Path(shows_dir) / "session.json"),
