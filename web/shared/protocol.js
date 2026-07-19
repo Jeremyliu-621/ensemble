@@ -11,6 +11,7 @@ export const WAND_POSE = "wand.pose";   // CV (webcam) wand: [tw, x, y, z, roll_
 export const WAND_GRAB = "wand.grab";
 export const WAND_FEEDBACK = "wand.feedback";
 export const WAND_RECAL = "wand.recal";
+export const WAND_POSE_CAPTURE = "wand.pose_capture";
 export const WAND_TOUCH = "wand.touch";   // {pad, state} MPR121 pads (hw wand)
 export const WAND_RANGE = "wand.range";   // {mm} ToF distance (hw wand)
 export const WAND_MODE = "wand.mode";     // {mode: "ai"|"det"}

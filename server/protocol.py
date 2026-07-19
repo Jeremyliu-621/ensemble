@@ -16,6 +16,7 @@ WAND_POSE = "wand.pose"         # {seq, frames:[[tw_ms, x, y, z, roll_deg], ...]
 WAND_GRAB = "wand.grab"         # {state:"start"|"end", tw}
 WAND_FEEDBACK = "wand.feedback" # {value: 1|-1}
 WAND_RECAL = "wand.recal"       # {tw}        zero the aiming yaw
+WAND_POSE_CAPTURE = "wand.pose_capture"  # {pose}  record current wand pose as this device
 WAND_TOUCH = "wand.touch"       # {pad:0-11, state:"down"|"up"}  MPR121 pads: 0-5 force a candidate
 WAND_RANGE = "wand.range"       # {mm}        ToF distance -> proximity tension (fx.tension)
 WAND_MODE = "wand.mode"         # {mode:"ai"|"det"}  physical toggle: gestures compose vs continuous control

@@ -226,14 +226,13 @@ class Conductor:
     #   point UP = swell arc          point DOWN = hush (held = stays hushed)
     #   point RIGHT = harmony blooms  point LEFT = passing runs
     #   wrist ROLL (either way) = arpeggio    SHAKE = arpeggio burst
+    # The wand's ENTIRE musical vocabulary: four device-named poles.
+    # (SHAKE deliberately absent — it's the select-all signal, not music.)
     _STROKE_MAP = {
-        "POINT_RIGHT": GestureFeatures(energy=0.85, size=0.75, duration=0.7),
-        "POINT_LEFT":  GestureFeatures(energy=0.72, size=0.70, duration=0.7),
-        "RAISE":       GestureFeatures(energy=0.55, size=0.50, vertical=0.9, duration=1.0),
-        "LOWER":       GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0),
-        "ROLL_RIGHT":  GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
-        "ROLL_LEFT":   GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
-        "SHAKE":       GestureFeatures(energy=1.00, size=0.90, duration=0.7),
+        "HARMONY":  GestureFeatures(energy=0.85, size=0.75, duration=0.7),
+        "ARPEGGIO": GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
+        "RUNS":     GestureFeatures(energy=0.72, size=0.70, duration=0.7),
+        "HUSH":     GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0),
     }
 
     def reset_conducting(self) -> None:

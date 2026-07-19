@@ -104,6 +104,7 @@ class App:
         self.shake = ShakeDetector()
         self._select_all_until = 0.0            # server-ms; aim forced to None until this passes
         self.strokes = StrokeTracker()          # live stroke intent for the panel
+        self._load_wand_poses()                 # captured pose calibration survives restarts
         self.showlog = ShowLog(DEFAULT_SESSION)
         self.announcer = Announcer(self._announce_line)
         self.imu_telemetry = ImuTelemetry()
@@ -152,6 +153,27 @@ class App:
                     json.dumps(grid), encoding="utf-8")
         except OSError as e:
             log.warning("song cache save failed: %s", e)
+
+    # --- captured wand poses persist across restarts (the calibration IS the
+    # product here — losing it on reboot would mean re-teaching every pose) ---
+    def _save_wand_poses(self) -> None:
+        try:
+            from config import DATA_DIR
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            (DATA_DIR / "wand_poses.json").write_text(
+                json.dumps(self.strokes.get_poses()), encoding="utf-8")
+        except OSError as e:
+            log.warning("wand pose save failed: %s", e)
+
+    def _load_wand_poses(self) -> None:
+        try:
+            from config import DATA_DIR
+            path = DATA_DIR / "wand_poses.json"
+            if path.exists():
+                self.strokes.set_poses(json.loads(path.read_text(encoding="utf-8")))
+                log.info("wand poses restored: %s", sorted(self.strokes.get_poses()))
+        except Exception as e:  # noqa: BLE001 - bad calibration must never block boot
+            log.warning("wand pose restore failed: %s", e)
 
     def _default_song(self) -> None:
         """No cached song: the demo boots straight into the flagship piece
@@ -566,6 +588,16 @@ class App:
         if t == P.WAND_RANGE:                   # ToF distance -> proximity tension
             await self._wand_range(float(msg.get("mm", -1.0)))
             return
+        if t == P.WAND_POSE_CAPTURE and conn.role in ("stage", "admin"):
+            pose = str(msg.get("pose", "")).upper()
+            if pose in ("NEUTRAL", "HARMONY", "ARPEGGIO", "RUNS", "HUSH"):
+                ok = self.strokes.capture(pose)
+                if ok:
+                    self._save_wand_poses()
+                await send_json(conn.ws, {"t": P.WAND_STATE, "pose_captured": pose if ok else None,
+                                          "poses": sorted(self.strokes.get_poses())})
+            return
+
         if t == P.WAND_RECAL:
             self.aimer.recal()
             self.strokes.recal()                # beam and pose zones share one "forward"

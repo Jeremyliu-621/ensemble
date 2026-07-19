@@ -107,13 +107,11 @@ async def strokes_mode(loops: int) -> None:
         return (9.0 * _m.sin(2 * _m.pi * 7 * t), 0.0, 9.81, 0.0, 0.0, 0.0)
 
     SCRIPT = [
-        turn_hold("POINT_RIGHT (pose)", 120.0),    # yaw 0 -> +60
-        turn_hold("POINT_LEFT (pose)", -240.0),    # +60 -> -60
-        turn_hold("recenter", 120.0),              # -60 -> 0 (dwell commits nothing)
-        pose("RAISE (pose)", ay=9.81, az=0.0),
-        pose("LOWER (pose)", ay=-9.81, az=0.0),
-        pose("ROLL_RIGHT (pose)", ax=9.3, az=3.0),
-        pose("ROLL_LEFT (pose)", ax=-9.3, az=3.0),
+        turn_hold("ARPEGGIO (right pole)", 168.0),     # yaw 0 -> +84
+        turn_hold("RUNS (left pole)", -336.0),         # +84 -> -84
+        turn_hold("recenter", 168.0),                  # -84 -> 0 (commits nothing)
+        pose("HARMONY (up pole)", ay=9.81, az=0.0),
+        pose("HUSH (down pole)", ay=-9.81, az=0.0),
         ("SHAKE", shake, 0.7),
     ]
 

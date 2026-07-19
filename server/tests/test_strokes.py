@@ -68,30 +68,30 @@ def gyro_pulse(axis, dps, duration_s):
 
 
 def test_point_right_left_yaw_zones():
-    """Turn past ±35° of the calibrated forward and dwell -> POINT_RIGHT /
-    POINT_LEFT. recal() re-zeroes forward."""
+    """Swing past ±60° of the calibrated forward and dwell -> ARPEGGIO (right)
+    / RUNS (left). recal() re-zeroes forward."""
     tr = StrokeTracker()
     run(tr, frames(rest(0.3)))
-    turn = frames(gyro_pulse(6, 120.0, 0.5), t0=2000)     # +60 deg
-    dwell = frames(rest(1.0), t0=2600)
+    turn = frames(gyro_pulse(6, 120.0, 0.7), t0=2000)     # +84 deg
+    dwell = frames(rest(1.0), t0=2800)
     got, _ = run(tr, turn + dwell)
-    assert "POINT_RIGHT" in got, got
+    assert "ARPEGGIO" in got, got
     tr.recal()                                            # here = new forward
     got2, _ = run(tr, frames(rest(1.6), t0=4000))
-    assert "POINT_RIGHT" not in got2, got2                 # recal cleared the zone
-    turn_l = frames(gyro_pulse(6, -120.0, 0.5), t0=6000)  # -60 deg from new zero
-    dwell_l = frames(rest(1.0), t0=6600)
+    assert "ARPEGGIO" not in got2, got2                    # recal cleared the zone
+    turn_l = frames(gyro_pulse(6, -120.0, 0.7), t0=6000)  # -84 deg from new zero
+    dwell_l = frames(rest(1.0), t0=6800)
     got3, _ = run(tr, turn_l + dwell_l)
-    assert "POINT_LEFT" in got3, got3
+    assert "RUNS" in got3, got3
 
 
 def test_motion_pitch_pulses_commit_nothing():
     """Motion detection is gone: a pitch-rate pulse with level gravity is not
-    a RAISE — only actually POINTING up (gravity) commits."""
+    a pole — only actually POINTING (gravity/heading) commits."""
     tr = StrokeTracker()
     run(tr, frames(rest(0.3)))
     got, _ = run(tr, frames(gyro_pulse(4, 100.0, 0.45), t0=2000))
-    assert "RAISE" not in got and "LOWER" not in got, got
+    assert "HARMONY" not in got and "HUSH" not in got, got
 
 
 def test_circle_motion_no_longer_commits():
@@ -109,15 +109,11 @@ def test_circle_motion_no_longer_commits():
 
 
 def test_pose_zones():
-    """Held poses commit from gravity alone: half-up = HALF_RAISE, full-up =
-    RAISE, wrist rolls = ROLL_RIGHT/ROLL_LEFT."""
-    tilt45 = G * math.sin(math.radians(42.0))     # ~0.67g on the lift axis
+    """The vertical poles commit from gravity alone: near-90 up = HARMONY,
+    near-90 down = HUSH."""
     cases = [
-        ((0.0, tilt45, G * math.cos(math.radians(42.0))), "RAISE"),   # 42 deg counts as up
-        ((0.0, G, 0.0), "RAISE"),
-        ((0.0, -G, 0.0), "LOWER"),
-        ((G * 0.95, 0.0, G * 0.31), "ROLL_RIGHT"),    # rolled ~72 deg right
-        ((-G * 0.95, 0.0, G * 0.31), "ROLL_LEFT"),
+        ((0.0, G, 0.0), "HARMONY"),
+        ((0.0, -G, 0.0), "HUSH"),
     ]
     for accel, want in cases:
         tr = StrokeTracker()
@@ -154,35 +150,56 @@ def test_shake():
 
 
 def test_tilt_hold_commits_raise_lower():
-    """Pointing the wand clearly up/down and holding calmly = RAISE/LOWER —
+    """Pointing the wand clearly up/down and holding calmly = HARMONY/HUSH —
     a pure gravity read (the robust path for real hardware)."""
     tr = StrokeTracker()
     run(tr, frames(rest(0.4)))
     up = lambda i, t: (0.0, G, 0.0, 0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
     got, _ = run(tr, frames(up, t0=2000))
-    assert "RAISE" in got, got
+    assert "HARMONY" in got, got
     tr2 = StrokeTracker()
     run(tr2, frames(rest(0.4)))
     down = lambda i, t: (0.0, -G, 0.0, 0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
     got2, _ = run(tr2, frames(down, t0=2000))
-    assert "LOWER" in got2, got2
+    assert "HUSH" in got2, got2
+
+
+def test_captured_pose_calibration():
+    """Teach poses by example: hold + capture, then the nearest taught pose
+    fires — no axis/sign/mounting assumptions anywhere."""
+    lean = (G * 0.71, 0.0, G * 0.71)          # some arbitrary mounting-skewed pose
+    up = (0.0, G * 0.71, G * 0.71)
+    tr = StrokeTracker()
+    hold = lambda a, t0: frames(lambda i, t: a + (0.0, 0.0, 0.0) if i < 60 else None, t0=t0)  # noqa: E731
+    run(tr, hold((0.0, 0.0, G), 1000))
+    tr.capture("NEUTRAL")
+    run(tr, hold(lean, 3000))
+    tr.capture("HARMONY")                      # whatever pose = harmony, by decree
+    run(tr, hold(up, 6000))
+    tr.capture("HUSH")
+    got, _ = run(tr, hold((0.0, 0.0, G), 9000))
+    assert got == [], f"neutral fired {got}"    # back to neutral: silence
+    got2, _ = run(tr, hold(lean, 12000))
+    assert "HARMONY" in got2, got2              # the taught pose fires its device
+    got3, _ = run(tr, hold(up, 15000))
+    assert "HUSH" in got3, got3
 
 
 def test_recal_pose_is_neutral():
     """Recalibrating in ANY pose makes that pose the silent neutral — zones
     fire only on departure from it, and returning goes quiet again."""
-    tilt40 = (0.0, G * math.sin(math.radians(40.0)), G * math.cos(math.radians(40.0)))
+    tilt20 = (0.0, G * math.sin(math.radians(20.0)), G * math.cos(math.radians(20.0)))
     tr = StrokeTracker()
-    hold40 = lambda i, t: tilt40 + (0.0, 0.0, 0.0) if i < 60 else None  # noqa: E731
-    run(tr, frames(hold40))              # wand held raised ~40 deg from the start
+    hold20 = lambda i, t: tilt20 + (0.0, 0.0, 0.0) if i < 60 else None  # noqa: E731
+    run(tr, frames(hold20))              # wand held raised ~20 deg from the start
     tr.recal()                           # <- this raised pose becomes neutral
-    got, _ = run(tr, frames(hold40, t0=3000))
+    got, _ = run(tr, frames(hold20, t0=3000))
     assert got == [], f"neutral pose fired {got}"
     up90 = lambda i, t: (0.0, G, 0.0, 0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
     got2, _ = run(tr, frames(up90, t0=6000))
-    assert "RAISE" in got2, got2         # 50 deg further up: now it's a raise
-    got3, _ = run(tr, frames(hold40, t0=9000))
-    assert "RAISE" not in got3, got3     # back to the recal'd pose: quiet
+    assert "HARMONY" in got2, got2       # 70 deg further up: the harmony pole
+    got3, _ = run(tr, frames(hold20, t0=9000))
+    assert "HARMONY" not in got3, got3   # back to the recal'd pose: quiet
 
 
 def test_still_and_noise_never_commit():

@@ -338,8 +338,8 @@
         <summary>✨ Moves — camera plays/pauses · the WAND conducts</summary>
         <div class="mv"><span class="ic">✋</span><div><b>Open palm, Hold ~1s</b><i>play</i></div></div>
         <div class="mv"><span class="ic">✊</span><div><b>Fist, hold ~1s</b><i>pause</i></div></div>
-        <div class="mv"><span class="ic">🪄</span><div><b>Wand positions</b> (hold ~1s)<i>up = swell · down = hush ·
-          point right = harmony · point left = runs · roll wrist = arpeggios</i></div></div>
+        <div class="mv"><span class="ic">🪄</span><div><b>Wand poles</b> (hold ~1s, near-90°)<i>up = harmony ·
+          down = hush · left = runs · right = arpeggios</i></div></div>
         <div class="mv"><span class="ic">🎯</span><div><b>Tap a phone card</b><i>conduct just that instrument</i></div></div>
       </details>
     </div>
@@ -360,8 +360,22 @@
         <div class="gbar g-swirl"><div class="lbl">swirl <b id="v-rotation">0.00</b></div><div class="track"><div class="fill" id="f-rotation"></div></div></div>
 
         <button id="recal" class="songbtn" style="width:100%;margin-top:.5rem"
-                title="point the wand at the laptop, then click — re-zeroes the aiming yaw (IMU drift)">
-          🎯 recalibrate — point at laptop, click</button>
+                title="hold the wand in your resting pose, then click — that pose + the song as written become the default">
+          🎯 recalibrate — hold neutral, click</button>
+
+        <details id="posecal" style="margin-top:.4rem">
+          <summary style="cursor:pointer;font-size:.82rem">🪄 teach the wand its poses</summary>
+          <div style="font-size:.75rem;color:#888;margin:.3rem 0">Hold the wand in each pose,
+            then click. Nearest taught pose wins — no axes, no guesswork.</div>
+          <div id="poserow" style="display:flex;flex-wrap:wrap;gap:.25rem">
+            <button class="songbtn posebtn" data-pose="NEUTRAL">🎼 neutral</button>
+            <button class="songbtn posebtn" data-pose="HARMONY">⚡ harmony (up)</button>
+            <button class="songbtn posebtn" data-pose="HUSH">🤫 hush (down)</button>
+            <button class="songbtn posebtn" data-pose="RUNS">🏃 runs (left)</button>
+            <button class="songbtn posebtn" data-pose="ARPEGGIO">🎶 arpeggio (right)</button>
+          </div>
+          <div id="posestat" style="font-size:.75rem;color:#888;margin-top:.25rem"></div>
+        </details>
 
         <div id="status">
           <div class="cell"><div class="k">sync</div><div class="v" id="spread">—</div></div>
