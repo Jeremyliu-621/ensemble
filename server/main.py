@@ -731,6 +731,24 @@ class App:
             if sec:
                 sec.volume = max(0.0, min(1.0, float(args.get("volume", 1.0))))
                 self.engine.on_sections_changed(self.session.engine_sections())
+        elif cmd == "kick":
+            # Stage-management: tap a card, hit Backspace — the slot is gone
+            # (ghost phones from testing clutter the map before a show).
+            sid = args.get("section_id")
+            if sid in self.session.sections:
+                del self.session.sections[sid]
+                self._save_session()
+                self.engine.on_sections_changed(self.session.engine_sections())
+                await self.hub.broadcast({"t": P.SCHED_CANCEL, "section": sid},
+                                         roles=("section", "stage"))
+                await self._broadcast_roster()
+        elif cmd == "gain":
+            # Console master-volume slider: the deterministic stand-in for the
+            # CV pinch-mixer — same fx.expr gain channel, zero hand-tracking.
+            g = max(0.0, min(1.5, float(args.get("gain", 1.0))))
+            await self.hub.broadcast({"t": P.FX_EXPR, "section": P.SECTION_ALL,
+                                      "semis": 0, "gain": round(g, 3)},
+                                     roles=("section", "stage"))
         elif cmd == "mute":
             sec = self.session.sections.get(args.get("section_id"))
             if sec:

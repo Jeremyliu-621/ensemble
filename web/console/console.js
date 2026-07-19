@@ -326,6 +326,12 @@ function applyEngine(eng) {
   const bpm = Math.round(eng.bpm);
   bpmNow = bpm;
   el("bpmlbl").textContent = bpm;
+  // keep the speed slider honest unless the operator is mid-drag (rubato and
+  // song loads move the real tempo underneath it)
+  if (document.activeElement !== el("temposlider")) {
+    el("temposlider").value = Math.max(60, Math.min(160, bpm));
+    el("tempoval").textContent = bpm;
+  }
   el("songname").textContent = eng.song || "—";
   if (eng.song !== curSong) { curSong = eng.song; dropIdle(); }   // new song landed
   if (eng.bars) el("barslbl").textContent = eng.bars + " bars";
@@ -617,6 +623,38 @@ el("recal").addEventListener("click", () => {
   el("recal").textContent = "🎯 neutral set — music reset ✓";
   setTimeout(() => { el("recal").textContent = "🎯 recalibrate — hold neutral, click"; }, 1500);
 });
+// Virtual wand: the console's stage-safe stand-ins for the hardware.
+// Device buttons ride the MPR121 pad path (deterministic triggers), and the
+// master slider drives the same fx.expr gain channel as the CV pinch-mixer.
+document.querySelectorAll(".vdev").forEach((b) =>
+  b.addEventListener("click", () => {
+    conn.send({ t: P.WAND_TOUCH, pad: parseInt(b.dataset.pad, 10), state: "down" });
+    b.classList.add("on");
+    setTimeout(() => b.classList.remove("on"), 900);
+  }));
+let tempoTimer = null;
+el("temposlider").addEventListener("input", () => {
+  const bpm = parseInt(el("temposlider").value, 10);
+  el("tempoval").textContent = bpm;
+  if (tempoTimer) return;
+  tempoTimer = setTimeout(() => {
+    tempoTimer = null;
+    bpmNow = parseInt(el("temposlider").value, 10);
+    el("bpmlbl").textContent = bpmNow;
+    conn.send({ t: P.ADMIN_CMD, cmd: "tempo", args: { bpm: bpmNow } });
+  }, 100);
+});
+let gainTimer = null;
+el("mastergain").addEventListener("input", () => {
+  const g = parseFloat(el("mastergain").value);
+  el("gainval").textContent = `${Math.round(g * 100)}%`;
+  if (gainTimer) return;                      // ~80ms throttle: smooth, not spammy
+  gainTimer = setTimeout(() => {
+    gainTimer = null;
+    conn.send({ t: P.ADMIN_CMD, cmd: "gain", args: { gain: parseFloat(el("mastergain").value) } });
+  }, 80);
+});
+
 // Pose teaching: hold the wand in a pose, click its button — the server
 // records the live sensor reading; classification = nearest taught pose.
 document.querySelectorAll(".posebtn").forEach((b) =>
@@ -632,6 +670,30 @@ document.querySelectorAll(".posebtn").forEach((b) =>
 // configured, the server also upgrades a LAN :8080 console request to :8443.
 if (window.isSecureContext) {
   el("camframe").src = `../cvwand/?s=${encodeURIComponent(session)}`;
+
+// 📷 kill-switch: unloading the iframe stops getUserMedia AND its ws client,
+// so a disabled camera can't fire transport or hold the wand slot on stage.
+el("camtoggle").addEventListener("click", () => {
+  const f = el("camframe"), on = !!f.src;
+  if (on) { f.dataset.src = f.src; f.removeAttribute("src"); }
+  else { f.src = f.dataset.src || `../cvwand/?s=${encodeURIComponent(session)}`; }
+  el("camtoggle").textContent = on ? "📷 camera OFF — tap to enable" : "📷 camera on";
+  el("camtoggle").classList.toggle("off", on);
+});
+
+// Backspace/Delete removes the tapped (aimed) instrument card — every phone
+// in that group is kicked from the roster (stage cleanup for ghost joins).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Backspace" && e.key !== "Delete") return;
+  const tag = (document.activeElement || {}).tagName || "";
+  if (tag === "INPUT" || tag === "TEXTAREA") return;
+  if (!aimedGroup) return;
+  const g = groups.find((x) => x.key === aimedGroup);
+  if (!g) return;
+  e.preventDefault();
+  for (const m of g.members) conn.send({ t: P.ADMIN_CMD, cmd: "kick", args: { section_id: m.id } });
+  aimedGroup = null;
+});
   camStarted = true;
 } else {
   const local = `http://localhost:${location.port || 80}${location.pathname}${location.search}`;
