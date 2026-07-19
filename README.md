@@ -7,7 +7,7 @@ wand's gesture. See `../.claude/plans/virtual-dancing-adleman.md` for the full
 plan and `RESEARCH.md` for the verified gesture-recognition research.
 
 **Build status:** P0 (scaffold), P1 server (clock-synced playback), three wand
-inputs (webcam hand / phone / [ESP32 later]), a music-engine slice where
+inputs (webcam hand / phone / physical UNO Q), a music-engine slice where
 **gestures audibly reshape the accompaniment**, **per-section instruments with
 distinct timbres**, a visual **[how-it-works guide](web/guide/)**, and a manual
 **[editor / control room](web/editor/)** (transport, tempo, force-a-candidate,
@@ -33,50 +33,267 @@ crimson+gold+serif design language. MIDI songs play their full arrangement
 across phones **including drums** (percussion synth); gestures can be recorded to
 `data/gestures/` for training a DTW/Jackknife classifier.
 
-### Run it — the flow
+## Known-good setup: laptop + UNO Q wand + phones
 
-1. `python server/main.py`
-2. **On the computer**, open the orchestra: **`http://localhost:8080/`** → **Tap to
-   start**. The laptop *is* the orchestra — you'll hear a looping melody + soft
-   chord pad, and a **QR code** appears.
-3. **Conduct it**, either way:
-   - **Phone wand** — scan the stage's QR with a phone on the same Wi-Fi (tap
-     through the one-time cert warning). Wave/tilt to conduct, hold the screen to
-     "grab". The stage shows "wand connected" when it's live.
-   - **Webcam** (no phone) — click *conduct with your webcam* on the stage →
-     allow the camera, **pinch** thumb+index and move your hand.
-4. Big/fast motion → busy line; gentle → calm pad; a twist → a counter-melody;
-   raise/lower → octave shift. Changes land on the **next bar (~2.4 s)**, so
-   conduct slightly ahead of the beat.
+Follow this order whenever the network changes. The server puts the laptop
+address it detects at startup into the QR code and into the UNO Q connection
+information. Starting the server before joining the final network is the most
+common cause of a stale, unreachable QR code.
 
-Extra phones can still join as **instrument sections** at
-`http://<lan-ip>:8080/section/?s=lol1` — once one does, the laptop hands the audio
-off to the phones and becomes the visual stage.
+### 0. One-time laptop setup
+
+From the repository root on macOS/Linux:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r server/requirements.txt
+```
+
+The commands below use `.venv/bin/python` directly. Activating the virtual
+environment is optional.
+
+Connect the Modulino Movement to the UNO Q Qwiic connector. Connect the
+Modulino Distance too when using the full production wand; the isolated stream
+probe only tests the Movement/IMU path.
+
+### 1. Provision the UNO Q in Arduino App Lab
+
+Arduino App Lab is required for the UNO Q's first setup and remains useful for
+viewing board logs. Arduino's official [UNO Q setup documentation](https://docs.arduino.cc/resources/datasheets/ABX00162-ABX00173-datasheet.pdf)
+describes the same first-time sequence.
+
+1. Install and open [Arduino App Lab](https://docs.arduino.cc/software/app-lab/).
+2. Connect the UNO Q to the laptop with a **USB-C data cable**. USB is required
+   for first-time PC-hosted setup; it may remain connected for power afterward.
+3. Install any prompted UNO Q updates, then restart App Lab if requested.
+4. Give the board a device name and password. The name becomes its network
+   hostname, for example `jerm.local`; the SSH login is normally
+   `arduino@jerm.local`.
+5. In App Lab's network setup, enter the credentials for the **same final Wi-Fi
+   or phone hotspot** that the laptop and phones will use.
+6. Wait for the board to appear as a Network target. Verify it from Terminal:
+
+   ```bash
+   ssh arduino@<board-name>.local
+   ```
+
+   For an IPv6-only hotspot, use:
+
+   ```bash
+   ssh -6 arduino@<board-name>.local
+   ```
+
+7. Type `exit` to close SSH. If `.local` lookup fails, use the board's numeric
+   address shown by App Lab instead.
+
+To run the full production app through the GUI on an ordinary IPv4 Wi-Fi, open
+`firmware/uno_q/wand/` as an App and click **Run** in the upper-right corner.
+App Lab builds the Linux component, flashes the MCU sketch, starts the app, and
+shows both sides' logs. For repeatable demos, prefer the deployment command in
+the IPv4 instructions below: it performs the same deployment while also writing
+the laptop's current address into `wand_config.json`.
+
+### 2A. Ordinary router/Wi-Fi (IPv4; full production wand)
+
+1. Connect the laptop, UNO Q, and every phone to the same Wi-Fi.
+2. Find the laptop's Wi-Fi address:
+
+   ```bash
+   ipconfig getifaddr en0
+   ```
+
+   If that is blank, find the active interface with:
+
+   ```bash
+   route -n get default | grep interface
+   ```
+
+   Then replace `en0` with that interface. A normal result looks like
+   `192.168.x.x`, `10.x.x.x`, or `172.16-31.x.x`. Never use `127.0.0.1` as the
+   board address.
+3. Stop a server left over from another network, then start a fresh one with the
+   detected address. Keep this terminal open:
+
+   ```bash
+   pkill -f 'server/main.py' 2>/dev/null || true
+   LAPTOP_IP=$(ipconfig getifaddr en0)
+   WM_LAN_IP="$LAPTOP_IP" .venv/bin/python server/main.py
+   ```
+
+4. In a second terminal, deploy the full wand. This rewrites
+   `wand_config.json`, so do it again after every network/address change. Stop
+   an old stream-probe app first so two board apps do not compete for the one
+   wand slot:
+
+   ```bash
+   LAPTOP_IP=$(ipconfig getifaddr en0)
+   BOARD=arduino@<board-name>.local
+   ssh "$BOARD" "arduino-app-cli app stop /home/arduino/ArduinoApps/phoneharmonic-stream-probe" 2>/dev/null || true
+   firmware/uno_q/deploy_wand.sh "$BOARD" "$LAPTOP_IP"
+   ```
+
+5. Open `http://localhost:8080/console/` on the laptop. The physical wand should
+   appear as connected and moving it should animate the pointing beam and meters.
+
+### 2B. Phone hotspot (including IPv6-only iPhone hotspots)
+
+Use this exact connection order:
+
+1. Enable the phone's hotspot. On iPhone 12 or newer, enable **Settings →
+   Personal Hotspot → Maximize Compatibility** if the UNO Q has difficulty
+   joining.
+2. Connect the **laptop to the hotspot through Wi-Fi**, not through iPhone USB
+   tethering. Unplug the iPhone from the laptop while diagnosing. The UNO Q may
+   remain connected to USB for power/App Lab; its application traffic must still
+   use the hotspot Wi-Fi.
+3. In Arduino App Lab, change the UNO Q network to this hotspot and wait for the
+   Network target to reconnect.
+4. Connect any additional instrument phones to the hotspot. Do not assume that
+   the phone providing the hotspot can also reach services hosted by a tethered
+   client; test it, but keep a second phone joined to the hotspot for the demo.
+5. Verify the active Mac interface and addresses:
+
+   ```bash
+   route -n get default | grep interface
+   ipconfig getifaddr en0
+   ifconfig en0 | grep 'inet6 '
+   ```
+
+#### If `ipconfig getifaddr en0` returns normal IPv4
+
+Use the ordinary IPv4 instructions above. If it returns `192.0.0.2` with a
+`255.255.255.255`/`/32` mask, do **not** use it: that is an isolated USB/CLAT
+address, not a board-reachable laptop address.
+
+#### If IPv4 is blank or `192.0.0.2`: use the relay-enabled IPv6 path
+
+Current UNO Q App containers have IPv4-only Docker networking even when the
+board host and laptop can communicate over IPv6. The stream-probe launcher
+handles this by installing a small relay on the UNO Q host. This is the exact
+path that has passed the real hotspot hardware test.
+
+1. Capture a non-loopback, non-link-local IPv6 address from the hotspot
+   interface. Keep the assignment on one physical shell line:
+
+   ```bash
+   LAPTOP_IPV6=$(ifconfig en0 | awk '/inet6 / && $2 !~ /^fe80:/ && $2 != "::1" {print $2;exit}')
+   echo "$LAPTOP_IPV6"
+   ```
+
+   It should print an address such as `2605:...`. Do not use an address beginning
+   with `fe80:`.
+2. Stop any stale server **before** deploying the board, then start a new server
+   with this address. Keep this terminal open:
+
+   ```bash
+   pkill -f 'server/main.py' 2>/dev/null || true
+   WM_LAN_IP="$LAPTOP_IPV6" .venv/bin/python server/main.py
+   ```
+
+   Confirm the startup output prints a bracketed section URL such as
+   `http://[2605:...]:8080/section/?s=lol1`.
+3. In a second terminal, use short variables to avoid accidentally splitting a
+   long command. Replace only the board hostname:
+
+   ```bash
+   LAPTOP_IPV6=$(ifconfig en0 | awk '/inet6 / && $2 !~ /^fe80:/ && $2 != "::1" {print $2;exit}')
+   PROBE=./firmware/uno_q/stream_probe/run_probe.sh
+   BOARD=arduino@<board-name>.local
+   SERVER_IP="$LAPTOP_IPV6"
+   ssh -6 "$BOARD" "arduino-app-cli app stop /home/arduino/ArduinoApps/phoneharmonic-wand" 2>/dev/null || true
+   "$PROBE" --board "$BOARD" --server-ip "$SERVER_IP" --keep-running
+   ```
+
+   `--server-ip` takes the **bare** IPv6 address; do not add square brackets.
+   The launcher adds brackets when building the WebSocket URL. If using shell
+   continuation backslashes instead, `\` must be the final character on the
+   line—no spaces may follow it.
+4. Follow the 30-second prompts: still, rotate clearly around yaw, still again.
+   Every result row must say `PASS`. `--keep-running` leaves both the IMU app and
+   IPv6 relay running for the live frontend.
+
+The relay-enabled stream probe provides production-format IMU data for aiming,
+live meters, stroke/pose recognition, and the motion-controlled demo. It does
+not send the production Distance/ToF squeeze events or receive LED/buzzer
+feedback. The full production wand currently requires ordinary reachable IPv4;
+porting the relay into `firmware/uno_q/wand/` remains required for the complete
+ToF/downlink feature set on an IPv6-only hotspot.
+
+### 3. Open the live app and join phones
+
+1. On the laptop, open **`http://localhost:8080/console/`**. Using `localhost`
+   keeps camera access in a browser secure context and avoids a stale LAN-IP TLS
+   certificate.
+2. Hard-refresh the console after every server/network restart. The QR is built
+   from the address captured when the server started; an already-open page may
+   still show the old QR until it reconnects or refreshes.
+3. Point the physical wand at the laptop and click **Recalibrate**. Move it and
+   confirm the beam/meters respond.
+4. Select a song and click **▶ Start** once. This user click is required by the
+   browser to unlock audio.
+5. Scan the refreshed QR with each instrument phone. Each section URL uses plain
+   `http://...:8080` and does not require a certificate. Tap the phone's Join
+   button to unlock its audio.
+6. If scanning fails, type the exact **section join** URL printed by the server
+   into the phone browser. IPv6 browser URLs require square brackets around the
+   address. If the URL works on a second phone but not on the hotspot-hosting
+   phone, use the second phone—the hotspot host is blocking/rejecting its route
+   to a tethered client.
+7. Keep Bluetooth audio off. Bluetooth output latency is far too high for the
+   synchronized-phone test.
+
+### 4. Required verification checkpoints
+
+- `ssh` or `ssh -6` reaches the UNO Q on the final network.
+- Server startup advertises the **current** network address, not the previous
+  router/hotspot address.
+- The wand test reports `variant=hw`, 45–70 frames/s, no invalid frames or
+  sequence gaps, and visible physical yaw movement.
+- The console beam and live meters react to the wand.
+- Every joined phone appears in the console roster and shows clock RTT/offset.
+- Every phone plays after its local Join/audio-unlock tap.
+- Lock/unlock a phone and confirm it reconnects; leave the system running for at
+  least five minutes before a demo.
+
+### Hotspot/network troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `ipconfig getifaddr en0` is blank | The hotspot is IPv6-only, or `en0` is not the active interface. Inspect `route -n get default` and use the IPv6 relay path. |
+| Address is `192.0.0.2/32` | USB tethering or CLAT isolation. Join the hotspot through Wi-Fi and use its global IPv6 address. |
+| `--server-ip must be ...` | The variable is empty or contains brackets. Run `echo "$LAPTOP_IPV6"`; pass the bare numeric address. |
+| `zsh: command not found: --server-ip` | The command was split after the board hostname without a final `\`. Use the short `PROBE`/`BOARD`/`SERVER_IP` variables above. |
+| Wand test passes but QR opens an old address | A server from the previous network is still running. Stop it, restart with `WM_LAN_IP`, then refresh the console. |
+| Correct section URL works on laptop but not a phone | Allow inbound Python/TCP 8080 in the Mac firewall. If only the hotspot-hosting phone fails, use another phone joined to the hotspot. |
+| QR page opens but there is no sound | Tap Join on that phone and Start on the console; browser audio must be unlocked separately on every device. |
+| Wand disappears after another wand page opens | Only one client owns the wand slot. Close `/wandsim/`, extra CV wand pages, and simulators during the hardware test. |
+
+For the probe's full diagnostics, logs, stop commands, and expected metrics, see
+[`firmware/uno_q/stream_probe/README.md`](firmware/uno_q/stream_probe/README.md).
 
 ---
 
 ## Quick start (laptop dev)
 
 ```bash
-python -m venv venv
-venv/Scripts/python -m pip install -r server/requirements.txt   # Windows
-# source venv/bin/activate && pip install -r server/requirements.txt   # mac/linux
-python server/main.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r server/requirements.txt
+.venv/bin/python server/main.py
 ```
 
 The server prints its LAN IP and the two URLs you need:
 
-- **Stage / admin:** `http://<lan-ip>:8080/stage/?admin=1`
+- **Laptop console:** `http://localhost:8080/console/`
 - **Section join:**  `http://<lan-ip>:8080/section/?s=lol1`
 
-Open the stage on your laptop; open the section URL on each phone (same WiFi).
+Open the console on your laptop; open the section URL on each phone (same Wi-Fi).
 
 ### Headless smoke test (no browser needed)
 
 With the server running:
 
 ```bash
-python server/tools/smoke_test.py
+.venv/bin/python server/tools/smoke_test.py
 ```
 
 Validates static serving, the hello/welcome handshake, clock ping/pong, section
@@ -87,7 +304,7 @@ join, and metronome scheduling end-to-end. Expect `ALL CHECKS PASSED`.
 ## Architecture (one process, two ports)
 
 - `:8080` — plain HTTP + `ws://`. Section pages (any phone, no cert hassle) and
-  the ESP32 wand.
+  the UNO Q wand.
 - `:8443` — HTTPS + `wss://` via mkcert. The wand-**sim** page only (DeviceMotion
   needs a secure context). Disabled until you add certs — the metronome test
   doesn't need it.
@@ -113,9 +330,9 @@ in the real wand later with zero server changes.
 
 | Option | URL | Needs | "Grab" gesture |
 |---|---|---|---|
-| 🖐️ **Hand (webcam)** | `http://localhost:8080/cvwand/` (laptop) | just a webcam | pinch thumb+index |
+| 🖐️ **Hand (webcam)** | `http://localhost:8080/cvwand/` (laptop) | just a webcam | pinch thumb+index, hold 5s |
 | 📱 **Phone** | `https://<lan-ip>:8443/wandsim/` (phone) | HTTPS cert (below) | hold finger on screen |
-| 🪄 **ESP32 wand** | (firmware, later) | the hardware | squeeze the MPR121 pad |
+| 🪄 **UNO Q wand** | `firmware/uno_q/wand/` | UNO Q + Movement + Distance | cover/release the ToF sensor |
 
 The hand and phone options both mirror the hardware's "grab to bound a gesture"
 semantics. The phone streams `wand.imu` in the exact format the firmware will —
@@ -184,6 +401,6 @@ scheduled instant — film both phones at 240 fps and compare flash timing (±4 
 ```
 server/   Python asyncio server (realtime + engine + ml as phases land)
 web/      no-build vanilla JS clients (stage, section; wandsim/mousesim later)
-firmware/ ESP32 wand (Arduino C++) — added when hardware arrives
+firmware/ UNO Q MCU sketch + onboard Linux/Python apps
 certs/    mkcert output (gitignored)
 ```
