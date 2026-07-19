@@ -109,11 +109,20 @@ async def run(shows_dir: str) -> int:
     assert r, "pad release did not return to auto"
     print("    pad 4 -> rhythmic_dense -> auto ✓")
 
-    print("[3] ToF distance -> fx.tension")
+    print("[3] ToF distance -> fx.tension (DET mode only — AI mode must stay clean)")
     await wand.send(json.dumps({"t": "wand.range", "mm": 150}))
-    fx = await recv_until(stage, "fx.tension")
+    fx = await recv_until(stage, "fx.tension", timeout=1.0,
+                          pred=lambda m: m.get("value", 0) > 0)
+    assert fx is None, f"AI mode must not sweep tension, got {fx}"
+    await wand.send(json.dumps({"t": "wand.mode", "mode": "det"}))
+    await recv_until(stage, "roster", pred=lambda m: m["wand"].get("mode") == "det")
+    await asyncio.sleep(0.15)                    # clear the tension throttle
+    await wand.send(json.dumps({"t": "wand.range", "mm": 150}))
+    fx = await recv_until(stage, "fx.tension", pred=lambda m: m.get("value", 0) > 0)
     assert fx and abs(fx["value"] - 0.9) < 0.01, f"got {fx}"
-    print(f"    150mm -> tension {fx['value']}")
+    await wand.send(json.dumps({"t": "wand.mode", "mode": "ai"}))
+    await recv_until(stage, "roster", pred=lambda m: m["wand"].get("mode") == "ai")
+    print(f"    AI: no sweep ✓ · det: 150mm -> tension {fx['value']}")
 
     print("[4] IMU yaw -> wand.state with an aimed section")
     frames = [[i * 20.0, 0, 0, 0, 0, 0, 0] for i in range(5)]
