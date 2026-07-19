@@ -6,8 +6,9 @@
 //   TRANSPORT — open palm plays, fist pauses, each held ~1.2s so a passing hand
 //               can't stop the show.
 //   MIXER     — pinch and drag: ↕ position rides volume, ↔ speed rides tempo,
-//               across every instrument, streamed on cv.expr. A held pinch locks
-//               transport out, so riding a fade can never pause the show.
+//               across every instrument, streamed on cv.expr. The pinch must be
+//               held ~5s to engage, and releasing it exits immediately. A held
+//               pinch locks transport out, so riding a fade can never pause the show.
 //
 // Runs on the laptop (getUserMedia needs a secure context — localhost qualifies).
 
@@ -34,6 +35,11 @@ const GRAB_ON = 0.55, GRAB_OFF = 0.80;
 // a fist's incidental thumb proximity is close but rarely this tight.
 const GRAB_ON_TIGHT = 0.30;
 
+// The mixer takes COMMITMENT, like transport does: hold the pinch this long
+// before it engages, so a hand that happens to close on its way somewhere else
+// can't grab the faders. Leaving is the opposite — release drops it instantly.
+const PINCH_ARM_MS = 5000;
+
 const POSE_BATCH = 2;         // frames per cv.expr packet — small, so the beat
                               // follows the hand instead of trailing it by a batch
 const TRAIL_LEN = 48;
@@ -51,6 +57,7 @@ let landmarker = null;
 let conn = null;
 let running = false;
 let grabbed = false;
+let pinchSince = null;        // when the current pinch closed; null = not pinching
 let seq = 0;
 let poseBuf = [];
 const trail = [];             // {xm, y, grabbed}
@@ -58,8 +65,9 @@ let playing = true;
 
 // ── the camera's vocabulary (docs/demo_flow.md) ──────────────────────────────
 //   ✋ PALM = play (hold)      ✊ FIST = pause (hold)
-//   🤏 PINCH = mixer: drag ↕ volume, swipe ↔ tempo, all instruments.
-//              While held, transport is locked out.
+//   🤏 PINCH = mixer (hold ~5s to engage): drag ↕ volume, swipe ↔ tempo, all
+//              instruments. Release exits at once. While held, transport is
+//              locked out.
 // Finger-count poses are NOT ours — modes/aim/select belong to the wand.
 // Discrete-gesture reliability: classify off smoothed landmarks (raw ones are
 // too jittery for finger-count geometry) and debounce with asymmetric
@@ -178,6 +186,7 @@ function loop(now) {
   if (landmarks) processHand(landmarks, now);
   else {
     if (grabbed) endPinch(now);     // hand left frame mid-pinch -> release the mixer
+    pinchSince = null;              // ...and a hand that left mid-arm starts over
     smoothLm = null;                // don't ease in from a stale hand position on re-entry
     candGesture = null; candCount = 0; missCount = 0;
     if (cvGesture !== null) { cvGesture = null; sendCvState(); }
@@ -203,9 +212,26 @@ function processHand(lm, now) {
   // camera never conducts (the server drops wand.* from the cv role). What it
   // DOES own is the mixer — pinch and drag to ride volume/tempo. Read off raw
   // landmarks, instant, so the fader doesn't lag the hand.
-  if (!grabbed && pinchRatio < GRAB_ON) startPinch(now, xm, tip.y);
-  else if (grabbed && pinchRatio > GRAB_OFF) endPinch(now);
-  else if (grabbed) pushPinch(now, xm, tip.y);
+  // Hysteresis still decides what counts as "pinching" (GRAB_ON to close,
+  // GRAB_OFF to open), but closing no longer engages the mixer on its own — it
+  // starts the arming clock, and only PINCH_ARM_MS of unbroken hold engages it.
+  // Release is immediate at every stage: it either cancels the arming or, once
+  // engaged, exits the mixer on the spot.
+  const pinching = grabbed || pinchSince !== null
+    ? pinchRatio <= GRAB_OFF
+    : pinchRatio < GRAB_ON;
+
+  if (!pinching) {
+    if (grabbed) endPinch(now);
+    pinchSince = null;
+  } else if (grabbed) {
+    pushPinch(now, xm, tip.y);
+  } else if (pinchSince === null) {
+    pinchSince = now;
+    flashCmd("🤏 hold to mix…");
+  } else if (now - pinchSince >= PINCH_ARM_MS) {
+    startPinch(now, xm, tip.y);
+  }
 
   // AFTER the mixer, never before: a hand closing into a pinch passes through
   // shapes that read as a fist, so on the very frame the pinch latches this
@@ -300,7 +326,10 @@ function tickTransportHold(now) {
   // ways that read as a fist, and pausing the show mid-fade is never what you
   // meant. Park the clock at "now" for as long as the mixer holds the hand, so
   // the wait also can't mature DURING a pinch and fire the instant you let go.
-  if (grabbed) { holdSince = now; return; }
+  // The arming hold counts as owning it too — otherwise the 5s wait for the
+  // mixer sits there long enough for the 1.2s fist hold to pause the show
+  // underneath it, every single time.
+  if (grabbed || pinchSince !== null) { holdSince = now; return; }
   if (holdFired || !cvGesture || now - holdSince < TRANSPORT_HOLD_MS) return;
   if (cvGesture === "PALM" && !playing) {
     playing = true; holdFired = true;
@@ -356,6 +385,7 @@ function pushPinch(now, xm, y) {
 
 function endPinch(now) {
   grabbed = false;
+  pinchSince = null;                  // a new pinch arms from scratch
   flushPinch("end");                  // whatever you dialled in stays put
 }
 
