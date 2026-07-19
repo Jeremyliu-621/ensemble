@@ -92,7 +92,9 @@ def test_raise_lower():
     assert got2 == ["LOWER"], got2
 
 
-def test_circle():
+def test_circle_motion_no_longer_commits():
+    """CIRCLE detection was cut (false-fired on ordinary waving): loop motion
+    must commit NOTHING — arpeggio comes from the ROLL poses now."""
     tr = StrokeTracker()
 
     def spec(i, t):
@@ -101,7 +103,25 @@ def test_circle():
         w = 2 * math.pi / 0.6                 # two full loops in 1.2s
         return (0.0, 0.0, G, 260.0 * math.sin(w * t), 0.0, 260.0 * math.cos(w * t))
     got, _ = run(tr, frames(spec))
-    assert "CIRCLE" in got, got
+    assert "CIRCLE" not in got, got
+
+
+def test_pose_zones():
+    """Held poses commit from gravity alone: half-up = HALF_RAISE, full-up =
+    RAISE, wrist rolls = ROLL_RIGHT/ROLL_LEFT."""
+    tilt45 = G * math.sin(math.radians(42.0))     # ~0.67g on the lift axis
+    cases = [
+        ((0.0, tilt45, G * math.cos(math.radians(42.0))), "HALF_RAISE"),
+        ((0.0, G, 0.0), "RAISE"),
+        ((G * 0.95, 0.0, G * 0.31), "ROLL_RIGHT"),    # rolled ~72 deg right
+        ((-G * 0.95, 0.0, G * 0.31), "ROLL_LEFT"),
+    ]
+    for accel, want in cases:
+        tr = StrokeTracker()
+        run(tr, frames(rest(0.4)))
+        hold = lambda i, t: accel + (0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
+        got, _ = run(tr, frames(hold, t0=2000))
+        assert want in got, f"{want}: {got}"
 
 
 def test_stab():

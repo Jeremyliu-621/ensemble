@@ -233,7 +233,10 @@ class Conductor:
         "RIGHT_SWIPE": GestureFeatures(energy=0.85, size=0.75, duration=0.7),
         "LEFT_SWIPE":  GestureFeatures(energy=0.72, size=0.70, duration=0.7),
         "RAISE":       GestureFeatures(energy=0.55, size=0.50, vertical=0.9, duration=1.0),
+        "HALF_RAISE":  GestureFeatures(energy=0.85, size=0.75, duration=0.7),   # harmonize
         "LOWER":       GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0),
+        "ROLL_RIGHT":  GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
+        "ROLL_LEFT":   GestureFeatures(energy=0.72, size=0.70, duration=0.7),   # passing
         "CIRCLE":      GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
         "STAB":        GestureFeatures(energy=0.90, size=0.40, duration=0.25),
         "SHAKE":       GestureFeatures(energy=1.00, size=0.90, duration=0.7),

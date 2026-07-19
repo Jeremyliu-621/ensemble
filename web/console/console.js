@@ -487,6 +487,11 @@ conn.on(P.SCHED_NOTES, (m) => {
 // upcoming bars vanish outright, which read as worse than the thing being
 // fixed. Left untouched, they just sit frozen in place until resume.
 conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
+// Deterministic-mode expression: the console IS the orchestra when no phones
+// have joined, so it must honour the tilt-driven pitch/volume/filter stream
+// (section pages do the same; without this, det mode is silent here).
+conn.on(P.FX_EXPR, (m) => { if (m.section === P.SECTION_ALL) synth.setExpression(m.semis, m.gain); });
+conn.on(P.FX_TENSION, (m) => synth.setTension(m.value));
 // hardware-wand streaming (~7 Hz): pointing beam + live meters + stroke intent
 const STROKE_LABELS = {
   LEFT_SWIPE: "← LEFT SWIPE", RIGHT_SWIPE: "→ RIGHT SWIPE",

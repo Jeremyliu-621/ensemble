@@ -94,9 +94,9 @@ async def strokes_mode(loops: int) -> None:
     def gyro(name, gx=0.0, gz=0.0, dur=0.45):
         return (name, lambda t: (0.0, 0.0, 9.81, gx, 0.0, gz), dur)
 
-    def circle(t):
-        w = 2 * _m.pi / 0.6
-        return (0.0, 0.0, 9.81, 260.0 * _m.sin(w * t), 0.0, 260.0 * _m.cos(w * t))
+    def pose(name, ax=0.0, ay=0.0, az=9.81, dur=1.6):
+        """A held orientation: gravity sits on the given axes, no motion."""
+        return (name, lambda t: (ax, ay, az, 0.0, 0.0, 0.0), dur)
 
     def stab(t):
         return (14.0 if 0.10 <= t < 0.18 else 0.0, 0.0, 9.81, 0.0, 0.0, 0.0)
@@ -109,7 +109,11 @@ async def strokes_mode(loops: int) -> None:
         gyro("LEFT_SWIPE", gz=-120.0),
         gyro("RAISE", gx=100.0),
         gyro("LOWER", gx=-100.0),
-        ("CIRCLE", circle, 1.2),
+        pose("HALF_RAISE (pose)", ay=6.6, az=7.2),
+        pose("RAISE (pose)", ay=9.81, az=0.0),
+        pose("LOWER (pose)", ay=-9.81, az=0.0),
+        pose("ROLL_RIGHT (pose)", ax=9.3, az=3.0),
+        pose("ROLL_LEFT (pose)", ax=-9.3, az=3.0),
         ("STAB", stab, 0.4),
         ("SHAKE", shake, 0.7),
     ]
