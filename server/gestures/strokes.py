@@ -38,15 +38,17 @@ RAISE_DEG = 30.0      # net pitch travel for raise/lower
 CIRCLE_ROT_DEG = 260.0  # cumulative rotation with little net travel -> circle
 STAB_ACC = 12.0       # linear-accel spike (m/s^2) — high: real swipes peak past 8
 STAB_TRAVEL = 20.0    # a stab goes nowhere: net yaw+pitch travel must stay tiny
-# ── pose zones: the whole vocabulary ─────────────────────────────────────────
-TILT_UP = 0.55        # pointed up (gravity read, drift-free)
-TILT_DOWN = -0.50     # pointed down
-ROLL_DEG = 55.0       # wrist roll (about the wand's long axis) to count as rolled
+# ── pose zones: the whole vocabulary, RELATIVE to the calibrated neutral ─────
+# Wherever the wand points at recal time (or its first calm hold) is NEUTRAL —
+# no zone fires there. Zones are departures FROM that pose, in degrees.
+PITCH_ZONE_DEG = 30.0  # raise/lower the tip this far from neutral
+ROLL_DEG = 55.0        # wrist roll (about the wand's long axis) from neutral
 ROLL_SIGN = float(os.environ.get("WM_ROLL_SIGN", "1"))   # -1 if rolls read mirrored
-YAW_ZONE_DEG = 35.0   # pointed left/right of calibrated forward (integrated yaw)
-TILT_HOLD_MS = 600.0  # zone held that long (calmly) -> commits
+YAW_ZONE_DEG = 35.0    # pointed left/right of neutral (integrated yaw)
+BASELINE_CALM_MS = 350.0  # first hold this calm = the auto-captured neutral
+TILT_HOLD_MS = 600.0   # zone held that long (calmly) -> commits
 TILT_REFIRE_MS = 1400.0  # ...and re-commits while held, so a hush stays down
-TILT_CALM_RMS = 2.5   # poses read only while the wand is otherwise quiet
+TILT_CALM_RMS = 2.5    # poses read only while the wand is otherwise quiet
 SHAKE_REVERSALS = 4   # sign flips of the dominant linear axis
 SHAKE_RMS = 3.0       # ...with at least this much vigor
 
@@ -81,11 +83,28 @@ class StrokeTracker:
         self._tilt_since: float | None = None  # when the current pose-hold began
         self._tilt_fired = 0.0                 # last pose commit (for re-fire)
         self._yaw = 0.0                        # integrated yaw for LEFT/RIGHT zones
+        self._pitch0: float | None = None      # calibrated neutral pitch (deg)
+        self._roll0 = 0.0                      # calibrated neutral roll (deg)
+        self._base_calm_since: float | None = None
+
+    def _angles(self) -> tuple[float, float]:
+        """(pitch, roll) of the wand in degrees, from the gravity EMA."""
+        g = self._g or [0.0, 0.0, 9.8]
+        pitch = math.degrees(math.asin(max(-1.0, min(1.0, g[1] / 9.8))))
+        roll = math.degrees(math.atan2(g[0], g[2])) * ROLL_SIGN
+        return pitch, roll
 
     def recal(self) -> None:
-        """Wherever the wand points now is 'forward' (the console's 🎯 button
-        calls this alongside the aimer's recal — one zero for beam and zones)."""
+        """The pose the wand is in RIGHT NOW becomes neutral — no zone fires
+        there; zones are departures from it. The console's 🎯 button calls
+        this alongside the aimer's recal: one shared neutral for beam and
+        zones. Before any frames arrive, the first calm hold auto-captures."""
         self._yaw = 0.0
+        if self._g is not None:
+            self._pitch0, self._roll0 = self._angles()
+        else:
+            self._pitch0 = None
+        self._base_calm_since = None
 
     def push(self, frames: list[list[float]]) -> tuple[str | None, dict, bool]:
         """Feed one batch. Returns (stroke, meters, committed_new).
@@ -126,27 +145,37 @@ class StrokeTracker:
         if la_mag > 1.0 or gyro_mag > 40.0:
             self._last_active = tw
 
-        # Pose zones ARE the vocabulary: where the wand points (tilt from
-        # gravity, left/right from integrated yaw, roll about its long axis),
-        # held calmly ~0.6s. A held zone RE-commits, so "pointed at the floor"
+        # Pose zones ARE the vocabulary — and they're RELATIVE to the
+        # calibrated neutral: wherever the wand pointed at recal (or its first
+        # calm hold) fires nothing; zones are departures from that pose, held
+        # calmly ~0.6s. A held zone RE-commits, so "pointed at the floor"
         # keeps the room hushed. Switching zones restarts the hold clock.
         self._yaw += yaw_rate * dt
-        tilt = self._g[1] / 9.8
-        roll = math.degrees(math.atan2(self._g[0], self._g[2])) * ROLL_SIGN
+        pitch, roll = self._angles()
+        if self._pitch0 is None:                 # auto-baseline: first calm hold
+            if la_mag < TILT_CALM_RMS:
+                if self._base_calm_since is None:
+                    self._base_calm_since = tw
+                elif tw - self._base_calm_since >= BASELINE_CALM_MS:
+                    self._pitch0, self._roll0 = pitch, roll
+            else:
+                self._base_calm_since = None
         zone: str | None = None
-        if la_mag < TILT_CALM_RMS:
-            if tilt > TILT_UP:
-                zone = "RAISE"                  # up: the swell
-            elif tilt < TILT_DOWN:
-                zone = "LOWER"                  # down: hush
-            elif roll > ROLL_DEG:
+        if self._pitch0 is not None and la_mag < TILT_CALM_RMS:
+            dpitch = pitch - self._pitch0
+            droll = ((roll - self._roll0 + 180.0) % 360.0) - 180.0
+            if dpitch > PITCH_ZONE_DEG:
+                zone = "RAISE"                  # raised from neutral: the swell
+            elif dpitch < -PITCH_ZONE_DEG:
+                zone = "LOWER"                  # dropped from neutral: hush
+            elif droll > ROLL_DEG:
                 zone = "ROLL_RIGHT"             # wrist rolled: arpeggio
-            elif roll < -ROLL_DEG:
+            elif droll < -ROLL_DEG:
                 zone = "ROLL_LEFT"
             elif self._yaw > YAW_ZONE_DEG:
-                zone = "POINT_RIGHT"            # right of forward: harmony
+                zone = "POINT_RIGHT"            # right of neutral: harmony
             elif self._yaw < -YAW_ZONE_DEG:
-                zone = "POINT_LEFT"             # left of forward: runs
+                zone = "POINT_LEFT"             # left of neutral: runs
         if zone != self._pose_zone:
             self._pose_zone = zone
             self._tilt_since = tw if zone else None

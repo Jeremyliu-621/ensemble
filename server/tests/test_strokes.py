@@ -168,6 +168,23 @@ def test_tilt_hold_commits_raise_lower():
     assert "LOWER" in got2, got2
 
 
+def test_recal_pose_is_neutral():
+    """Recalibrating in ANY pose makes that pose the silent neutral — zones
+    fire only on departure from it, and returning goes quiet again."""
+    tilt40 = (0.0, G * math.sin(math.radians(40.0)), G * math.cos(math.radians(40.0)))
+    tr = StrokeTracker()
+    hold40 = lambda i, t: tilt40 + (0.0, 0.0, 0.0) if i < 60 else None  # noqa: E731
+    run(tr, frames(hold40))              # wand held raised ~40 deg from the start
+    tr.recal()                           # <- this raised pose becomes neutral
+    got, _ = run(tr, frames(hold40, t0=3000))
+    assert got == [], f"neutral pose fired {got}"
+    up90 = lambda i, t: (0.0, G, 0.0, 0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
+    got2, _ = run(tr, frames(up90, t0=6000))
+    assert "RAISE" in got2, got2         # 50 deg further up: now it's a raise
+    got3, _ = run(tr, frames(hold40, t0=9000))
+    assert "RAISE" not in got3, got3     # back to the recal'd pose: quiet
+
+
 def test_still_and_noise_never_commit():
     tr = StrokeTracker()
     _, last = run(tr, frames(rest(1.2)))
