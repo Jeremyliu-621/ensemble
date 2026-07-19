@@ -969,7 +969,7 @@ async def main() -> None:
         log.warning("    Wi-Fi as the phones, or start with:  WM_LAN_IP=<reachable-address> python server/main.py")
     log.info("open on this laptop:  http://localhost:%d/", HTTP_PORT)
     url_host = format_url_host(app.lan_ip)
-    log.info("stage/admin:  http://%s:%d/stage/?admin=1", url_host, HTTP_PORT)
+    log.info("console:      http://%s:%d/console/", url_host, HTTP_PORT)
     log.info("section join: http://%s:%d/section/?s=%s", url_host, HTTP_PORT, DEFAULT_SESSION)
     asyncio.create_task(app.prune_loop())
     if not os.environ.get("WM_DISCOVERY_OFF"):

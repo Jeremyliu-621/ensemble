@@ -5,12 +5,28 @@ as the phones and connects straight to the laptop server — no laptop-side brid
 """
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 # The laptop's address is normally DISCOVERED (the server broadcasts a UDP
 # beacon — see wand_link.resolve_ws_url), so nothing needs typing on the
-# board. WAND_LAPTOP_IP remains as a manual override that always wins.
-LAPTOP_IP = os.environ.get("WAND_LAPTOP_IP")          # None = auto-discover
+# board. WAND_LAPTOP_IP remains a manual override that always wins.
+#
+# arduino-app-cli headless deploys don't forward the deploying shell's env
+# into the app's container (unlike App Lab GUI runs, where WAND_LAPTOP_IP as
+# documented does reach the process), so a headless deploy also accepts a
+# wand_config.json dropped next to this file at deploy time — same pattern
+# stream_probe/python/main.py already uses for its ws_url/session.
+def _file_laptop_ip() -> str | None:
+    try:
+        raw = json.loads(Path(__file__).with_name("wand_config.json").read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    ip = raw.get("laptop_ip")
+    return ip if isinstance(ip, str) and ip else None
+
+LAPTOP_IP = os.environ.get("WAND_LAPTOP_IP") or _file_laptop_ip()   # None = auto-discover
 WS_PORT = int(os.environ.get("WAND_WS_PORT", "8080"))
 SESSION = os.environ.get("WAND_SESSION", "lol1")
 

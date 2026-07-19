@@ -40,7 +40,10 @@ static const float G = 9.81f;                 // g -> m/s^2 (keep gravity)
 static const unsigned long SAMPLE_US = 16667; // ~60 Hz
 
 // Parse "playing,mode,aim" pushed from Linux and apply local feedback.
-void onCmd(const String& payload) {
+// Bridge.provide wraps this in std::function<void(Args...)> and default-
+// constructs a std::tuple<Args...> to decode into — a reference-typed Args
+// (const String&) can't be default-constructed, so this must take by value.
+void onCmd(String payload) {
   int c1 = payload.indexOf(',');
   int c2 = payload.indexOf(',', c1 + 1);
   if (c1 < 0 || c2 < 0) return;

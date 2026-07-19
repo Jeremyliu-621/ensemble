@@ -132,6 +132,12 @@ function connect() {
     const fx = effectLabel(m.device);
     flashCmd(`${fx.icon} ${fx.label}`);
   });
+  // engine.state only broadcasts while notes are scheduled, so it never reports
+  // the "just paused" transition — wand.cmd is the reliable, unconditional sync
+  // (sent on connect and after every admin cmd), so PALM/FIST don't go stale.
+  conn.on(P.WAND_CMD, (m) => {
+    if (m.playing !== undefined) playing = m.playing;
+  });
   // roster: SELECT-mode pointing sweeps the connected phones left -> right
   conn.on(P.ROSTER, (m) => {
     roster = (m.sections || []).filter((s) => s.connected)
