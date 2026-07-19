@@ -181,6 +181,21 @@
 
     /* in-room hints. The QR lives permanently in the top-right corner —
        anyone can walk up and scan, no button to find first. */
+    #qrbtns { position: absolute; top: -10px; right: -10px; display: flex; gap: 4px; z-index: 5; }
+    #qrbtns button { width: 22px; height: 22px; font-size: 11px; line-height: 1; cursor: pointer;
+      color: var(--ink); background: var(--card); border: 2px solid var(--ink); border-radius: 6px;
+      box-shadow: 2px 2px 0 rgba(54,38,25,.18); }
+    #qrchip { position: absolute; right: 12px; top: 12px; z-index: 4; cursor: pointer;
+      font: 700 10px var(--px-display); padding: .45rem .6rem; color: var(--ink);
+      background: var(--card); border: 2px solid var(--ink); border-radius: 8px;
+      box-shadow: var(--shadow); }
+    /* expanded: the QR takes the screen so the back row can scan it */
+    #roomqr.big { position: fixed; inset: 0; right: auto; top: auto; width: 100vw; height: 100vh;
+      display: flex; align-items: center; justify-content: center; z-index: 60;
+      background: rgba(25, 20, 16, .88); border: none; box-shadow: none; border-radius: 0; cursor: pointer; }
+    #roomqr.big #qr { width: min(74vw, 74vh); height: min(74vw, 74vh); }
+    #roomqr.big #qrbtns { position: fixed; top: 18px; right: 18px; }
+    #roomqr.big #qrbtns button { width: 34px; height: 34px; font-size: 16px; }
     #roomqr { position: absolute; right: 12px; top: 12px; z-index: 4;
       text-align: center; padding: .55rem .65rem; background: var(--card); border: var(--border);
       border-radius: 10px; box-shadow: 2px 2px 0 rgba(54,38,25,.2); }
@@ -332,8 +347,13 @@
         </div>
       </div>
       <div id="roomqr">
+        <div id="qrbtns">
+          <button id="qrbig" title="expand — let the whole room scan">⤢</button>
+          <button id="qrhide" title="hide — stop new joins">✕</button>
+        </div>
         <div id="qr"></div>
       </div>
+      <button id="qrchip" hidden title="show the join QR again">📵 QR</button>
       <div id="roomhint" hidden><b>Drag</b> a phone to where it really sits ·
         <b>tap</b> it to conduct just that instrument</div>
       <details id="moves" open>

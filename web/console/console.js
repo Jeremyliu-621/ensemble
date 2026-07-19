@@ -671,6 +671,21 @@ document.querySelectorAll(".posebtn").forEach((b) =>
 if (window.isSecureContext) {
   el("camframe").src = `../cvwand/?s=${encodeURIComponent(session)}`;
 
+// Join-QR crowd control: ⤢ expands it fullscreen so the back row can scan;
+// ✕ hides it so no one new can join (a 📵 chip brings it back).
+el("qrbig").addEventListener("click", (e) => { e.stopPropagation(); el("roomqr").classList.add("big"); });
+el("roomqr").addEventListener("click", () => el("roomqr").classList.remove("big"));
+el("qrhide").addEventListener("click", (e) => {
+  e.stopPropagation();
+  el("roomqr").classList.remove("big");
+  el("roomqr").hidden = true;
+  el("qrchip").hidden = false;
+});
+el("qrchip").addEventListener("click", () => {
+  el("qrchip").hidden = true;
+  el("roomqr").hidden = false;
+});
+
 // 📷 kill-switch: unloading the iframe stops getUserMedia AND its ws client,
 // so a disabled camera can't fire transport or hold the wand slot on stage.
 el("camtoggle").addEventListener("click", () => {
