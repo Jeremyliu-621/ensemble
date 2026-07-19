@@ -40,7 +40,7 @@ CV_EXPR = "cv.expr"             # {state:"start"|"move"|"end", frames:[[tw, xm, 
 # Closed vocabularies for CV_STATE. Keeping these server-side prevents arbitrary
 # client strings (including control characters) from being written to the log.
 CV_GESTURES = ("PALM", "PINCH", "FIST", "ONE_FINGER", "TWO_FINGERS", "THREE_FINGERS",
-               "THUMB_UP", "THUMB_DOWN", "VICTORY", "POINT_UP")
+               "THUMB_UP", "THUMB_DOWN", "VICTORY")
 CV_MODES = ("NONE", "SELECT", "DETERMINISTIC", "AI")
 
 # --- Server -> Client ---

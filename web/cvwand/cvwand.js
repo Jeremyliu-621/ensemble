@@ -307,7 +307,6 @@ function classify(lm, pinchRatio) {
     if (b.categoryName === "Thumb_Up") return "THUMB_UP";
     if (b.categoryName === "Thumb_Down") return "THUMB_DOWN";
     if (b.categoryName === "Victory") return "VICTORY";
-    if (b.categoryName === "Pointing_Up") return "POINT_UP";
   }
   if (pinchRatio < GRAB_ON) return "PINCH";
   return null;
@@ -363,7 +362,8 @@ const SIGN_DEVICE = {
   THUMB_UP: ["HARMONY", "👍 harmony"],
   THUMB_DOWN: ["HUSH", "👎 hush"],
   VICTORY: ["ARPEGGIO", "✌️ arpeggio"],
-  POINT_UP: ["RUNS", "☝️ runs"],
+  // POINT_UP was cut: MediaPipe confuses it with Victory. Runs stay on the
+  // wand pose / pads / console button.
 };
 let holdSince = 0, holdFired = false;
 
