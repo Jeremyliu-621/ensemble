@@ -86,7 +86,13 @@
     #leftempty a { color: var(--purple); }
 
     /* MIDI drop zone — bottom of the score column */
-    #dropwrap { flex: none; padding: .55rem; border-top: 2px solid var(--card-deep); }
+    #songrow { flex: none; display: flex; flex-wrap: wrap; gap: .3rem; padding: .55rem .55rem 0;
+               border-top: 2px solid var(--card-deep); }
+    .songbtn { flex: 1 1 45%; padding: .45rem .3rem; font: inherit; font-size: .82rem;
+               background: var(--card-deep); color: inherit; border: 1px solid transparent;
+               border-radius: 8px; cursor: pointer; white-space: nowrap; }
+    .songbtn:hover { border-color: var(--blue); }
+    #dropwrap { flex: none; padding: .55rem; }
     #drop { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
       padding: .7rem .6rem; border: 2px dashed var(--ink-faint); border-radius: 9px; background: #fdfaf2;
       text-align: center; transition: border-color .12s, background .12s, transform .08s; }
@@ -293,9 +299,15 @@
     <div class="side panel" id="leftcol">
       <div class="ph"><span>Tracks</span><span class="sub" id="barslbl"></span></div>
       <div class="scroll" id="lanes"></div>
-      <div id="leftempty">Built-in loop playing.<br>Drop a MIDI below and every instrument
+      <div id="leftempty">Pick a song below (or drop a MIDI) and every instrument
         shows up here — and as a phone in the room. Fine-tune notes in the
         <a href="../editor/" target="_blank">editor</a>.</div>
+      <div id="songrow">
+        <button class="songbtn" data-song="zelda-fairy.mid">🧚 Fairy Fountain</button>
+        <button class="songbtn" data-song="zora-domain.mid">🐟 Zora's Domain</button>
+        <button class="songbtn" data-song="canon.mid">🎻 Canon in D</button>
+        <button class="songbtn" data-song="yt-song.mid">📺 YT song</button>
+      </div>
       <div id="dropwrap">
         <label id="drop" for="midifile">
           <span class="di">🎵</span>

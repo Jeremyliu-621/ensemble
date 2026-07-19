@@ -516,6 +516,9 @@ function nudgeTempo(d) {
 }
 el("tdown").addEventListener("click", () => nudgeTempo(-4));
 el("tup").addEventListener("click", () => nudgeTempo(4));
+// One-click songs from songs/ — same message the demo page sends.
+document.querySelectorAll(".songbtn").forEach((b) =>
+  b.addEventListener("click", () => conn.send({ t: P.SONG_FILE, name: b.dataset.song })));
 
 // camera hub — seamless: the camera wand is simply ON. The iframe loads at
 // boot (its page auto-starts the webcam; the browser's permission prompt is
