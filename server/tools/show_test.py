@@ -99,21 +99,29 @@ async def run(shows_dir: str) -> int:
     assert ann and ann["text"] == ANNOUNCE_TEXT, f"got {ann}"
     print(f"    announce: {ann['text']!r}")
 
-    print("[2] MPR121 pad forces / releases a candidate")
+    print("[2] MPR121 pad = deterministic device button (pad 0 -> HARMONY)")
     wand, _ = await ws("wand")
-    await wand.send(json.dumps({"t": "wand.touch", "pad": 4, "state": "down"}))
-    r = await recv_until(stage, "roster", pred=lambda m: m["engine"]["forced"] == "rhythmic_dense")
-    assert r, "pad 4 did not force rhythmic_dense"
-    await wand.send(json.dumps({"t": "wand.touch", "pad": 4, "state": "up"}))
-    r = await recv_until(stage, "roster", pred=lambda m: m["engine"]["forced"] == "auto")
-    assert r, "pad release did not return to auto"
-    print("    pad 4 -> rhythmic_dense -> auto ✓")
+    await wand.send(json.dumps({"t": "wand.touch", "pad": 0, "state": "down"}))
+    r = await recv_until(stage, "engine.state", timeout=8.0,
+                         pred=lambda m: (m.get("intensity") or 0.5) > 0.55)
+    assert r, "pad 0 did not push the harmony envelope"
+    await wand.send(json.dumps({"t": "wand.touch", "pad": 0, "state": "up"}))  # no-op, no crash
+    print(f"    pad 0 -> envelope {r['intensity']} (harmony rising) ✓")
 
-    print("[3] ToF distance -> fx.tension")
+    print("[3] ToF distance -> fx.tension (DET mode only — AI mode must stay clean)")
     await wand.send(json.dumps({"t": "wand.range", "mm": 150}))
-    fx = await recv_until(stage, "fx.tension")
+    fx = await recv_until(stage, "fx.tension", timeout=1.0,
+                          pred=lambda m: m.get("value", 0) > 0)
+    assert fx is None, f"AI mode must not sweep tension, got {fx}"
+    await wand.send(json.dumps({"t": "wand.mode", "mode": "det"}))
+    await recv_until(stage, "roster", pred=lambda m: m["wand"].get("mode") == "det")
+    await asyncio.sleep(0.15)                    # clear the tension throttle
+    await wand.send(json.dumps({"t": "wand.range", "mm": 150}))
+    fx = await recv_until(stage, "fx.tension", pred=lambda m: m.get("value", 0) > 0)
     assert fx and abs(fx["value"] - 0.9) < 0.01, f"got {fx}"
-    print(f"    150mm -> tension {fx['value']}")
+    await wand.send(json.dumps({"t": "wand.mode", "mode": "ai"}))
+    await recv_until(stage, "roster", pred=lambda m: m["wand"].get("mode") == "ai")
+    print(f"    AI: no sweep ✓ · det: 150mm -> tension {fx['value']}")
 
     print("[4] IMU yaw -> wand.state with an aimed section")
     frames = [[i * 20.0, 0, 0, 0, 0, 0, 0] for i in range(5)]
@@ -190,6 +198,10 @@ def main() -> int:
     env = dict(os.environ)
     env.update({
         "WM_HTTP_PORT": str(PORT),
+        # certs/ may exist: the spawned server binds TLS too — move it off the
+        # live show server's 8443 (same fix as rework_test).
+        "WM_HTTPS_PORT": str(PORT + 1),
+        "WM_DISCOVERY_OFF": "1",
         "WM_DECISION_LOG": "0",
         "WM_SHOWS_DIR": shows_dir,
         "WM_SESSION_FILE": str(pathlib.Path(shows_dir) / "session.json"),

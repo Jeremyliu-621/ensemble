@@ -202,35 +202,16 @@ function processHand(lm, now) {
   const pinchRatio = dist(lm[THUMB_TIP], lm[INDEX_TIP]) / handW;
   const xm = 1 - tip.x;   // mirror x for a selfie-natural feel
 
-  // ── discrete gesture layer: smoothed + debounced, drives modes/transport/cv.state ──
-  const slm = smoothLandmarks(lm);
-  const sHandW = dist(slm[INDEX_MCP], slm[PINKY_MCP]) || 0.001;
-  const sPinchRatio = dist(slm[THUMB_TIP], slm[INDEX_TIP]) / sHandW;
-  const g = classify(slm, sPinchRatio);
-  updateGesture(g, xm, now);
+  // ── discrete gesture layer: debounced, drives modes/transport/cv.state ────
+  const g = classify(lm, pinchRatio);
+  if (g === rawGesture) rawCount++;
+  else { rawGesture = g; rawCount = 1; }
+  if (rawCount === STABLE_FRAMES && g !== cvGesture) commitGesture(g, xm);
+  tickTransportHold(now);
 
-  // ── conducting/expression pinch: INSTANT, off raw landmarks (the feel stays
-  // exactly as-is). AI mode: grab bounds an AI conducting-gesture window.
-  // DET mode: grab bounds a pinch-drag window the server reads continuously
-  // off this same wand.pose stream — ↕ position = volume, ↔ speed = tempo,
-  // applied to every instrument (see server _cv_expression).
-  if (cvMode === "AI" || cvMode === "DETERMINISTIC") {
-    if (!grabbed && pinchRatio < GRAB_ON) startGrab(now);
-    else if (grabbed && pinchRatio > GRAB_OFF) endGrab(now);
-  } else if (grabbed) {
-    endGrab(now);                       // left AI/DET mode mid-grab: close the window
-  }
-
-  // ── mode behaviours ───────────────────────────────────────────────────────
-  if (cvMode === "SELECT" && cvGesture !== "PINCH") {
-    if (detectShake(xm, now)) selectAll(now);
-    else if (now >= selectAllUntil) aimAt(xm, now);
-  }
-
-  // Pose frame stream (the server only buffers/reads these inside a grab).
-  const roll = Math.atan2(lm[MIDDLE_MCP].y - lm[WRIST].y, lm[MIDDLE_MCP].x - lm[WRIST].x) * 180 / Math.PI;
-  poseBuf.push([Math.round(now), +xm.toFixed(4), +tip.y.toFixed(4), +tip.z.toFixed(4), +roll.toFixed(1)]);
-  if (poseBuf.length >= POSE_BATCH) flushPose();
+  // Conducting pinch, mode poses, select/aim, and the pose stream are all
+  // CUT: the camera is transport-only now (server enforces it too — wand.*
+  // from the cv role is dropped). The wand conducts; the camera plays/pauses.
 
   trail.push({ xm, y: tip.y, grabbed });
   if (trail.length > TRAIL_LEN) trail.shift();
@@ -260,54 +241,31 @@ function classify(lm, pinchRatio) {
   return null;
 }
 
-// EMA landmark smoothing, used only for discrete-gesture classification — aim
-// pointing and the AI-mode conducting pinch read raw landmarks so they don't lag.
-function smoothLandmarks(lm) {
-  if (!smoothLm || smoothLm.length !== lm.length) {
-    smoothLm = lm.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    return smoothLm;
-  }
-  for (let i = 0; i < lm.length; i++) {
-    smoothLm[i].x += SMOOTH_ALPHA * (lm[i].x - smoothLm[i].x);
-    smoothLm[i].y += SMOOTH_ALPHA * (lm[i].y - smoothLm[i].y);
-    smoothLm[i].z += SMOOTH_ALPHA * (lm[i].z - smoothLm[i].z);
-  }
-  return smoothLm;
-}
-
-// Confirm a new gesture only after CONFIRM_FRAMES consecutive frames, and only
-// drop an active one after RELEASE_FRAMES consecutive misses — a single noisy
-// classification can neither restart a hold nor prematurely end one.
-function updateGesture(g, xm, now) {
-  if (cvGesture !== null) {
-    if (g === cvGesture) { missCount = 0; return; }
-    missCount++;
-    if (missCount < RELEASE_FRAMES) return;
-    missCount = 0;
-    candGesture = g; candCount = g ? 1 : 0;
-    commitGesture(null, xm);          // release: drop to neutral
-    return;
-  }
-  if (!g) { candGesture = null; candCount = 0; return; }
-  if (g === candGesture) candCount++;
-  else { candGesture = g; candCount = 1; }
-  if (candCount >= CONFIRM_FRAMES && now - lastCommitMs >= COMMIT_COOLDOWN_MS) {
-    lastCommitMs = now;
-    candGesture = null; candCount = 0;
-    commitGesture(g, xm);
-  }
-}
+// The camera is TRANSPORT-ONLY (the wand owns conducting, modes, and aim —
+// a finger count must never flip det/ai mid-performance). And transport needs
+// COMMITMENT: hold the pose ~1.2s before it fires, so a passing open hand
+// can't stop the show.
+const TRANSPORT_HOLD_MS = 1200;
+let holdSince = 0, holdFired = false;
 
 function commitGesture(g, xm) {
   cvGesture = g;
-  if (g === "PALM" && !playing) {
-    playing = true; send({ t: P.ADMIN_CMD, cmd: "start" }); flashCmd("✋ play");
-  } else if (g === "FIST" && playing) {
-    playing = false; send({ t: P.ADMIN_CMD, cmd: "stop" }); flashCmd("✊ pause");
-  } else if (g === "ONE_FINGER") setMode("SELECT");
-  else if (g === "TWO_FINGERS") setMode("DETERMINISTIC");
-  else if (g === "THREE_FINGERS") setMode("AI");
+  holdSince = performance.now();
+  holdFired = false;
+  if (g === "PALM" && !playing) flashCmd("✋ hold to play…");
+  else if (g === "FIST" && playing) flashCmd("✊ hold to pause…");
   sendCvState();
+}
+
+function tickTransportHold(now) {
+  if (holdFired || !cvGesture || now - holdSince < TRANSPORT_HOLD_MS) return;
+  if (cvGesture === "PALM" && !playing) {
+    playing = true; holdFired = true;
+    send({ t: P.ADMIN_CMD, cmd: "start" }); flashCmd("✋ play");
+  } else if (cvGesture === "FIST" && playing) {
+    playing = false; holdFired = true;
+    send({ t: P.ADMIN_CMD, cmd: "stop" }); flashCmd("✊ pause");
+  }
 }
 
 function setMode(m) {

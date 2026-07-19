@@ -516,13 +516,28 @@ conn.on(P.SCHED_NOTES, (m) => {
 // upcoming bars vanish outright, which read as worse than the thing being
 // fixed. Left untouched, they just sit frozen in place until resume.
 conn.on(P.SCHED_CANCEL, (m) => { if (m.allnotesoff) synth.panic(); });
+// Deterministic-mode expression: the console IS the orchestra when no phones
+// have joined, so it must honour the tilt-driven pitch/volume/filter stream
+// (section pages do the same; without this, det mode is silent here).
+conn.on(P.FX_EXPR, (m) => { if (m.section === P.SECTION_ALL) synth.setExpression(m.semis, m.gain); });
+conn.on(P.FX_TENSION, (m) => synth.setTension(m.value));
 // hardware-wand streaming (~7 Hz): pointing beam + live meters + stroke intent
 const STROKE_LABELS = {
   LEFT_SWIPE: "← LEFT SWIPE", RIGHT_SWIPE: "→ RIGHT SWIPE",
+  POINT_LEFT: "← POINT LEFT", POINT_RIGHT: "→ POINT RIGHT",
   RAISE: "↑ RAISE", LOWER: "↓ LOWER", CIRCLE: "⟳ CIRCLE",
+  ROLL_LEFT: "↺ ROLL LEFT", ROLL_RIGHT: "↻ ROLL RIGHT",
   STAB: "➤ STAB", SHAKE: "≋ SHAKE",
+  HARMONY: "⚡ HARMONY", ARPEGGIO: "🎶 ARPEGGIO", RUNS: "🏃 RUNS",
+  SWELL: "🙌 SWELL", HUSH: "🤫 HUSH",
 };
 conn.on(P.WAND_STATE, (m) => {
+  if (m.pose_captured !== undefined) {
+    el("posestat").textContent = m.pose_captured
+      ? `taught: ${(m.poses || []).join(" · ")}`
+      : "no wand data yet — is the board streaming?";
+    return;
+  }
   if (m.yaw_deg === undefined) return;
   wandYaw = m.yaw_deg;
   wandGrabbed = !!m.grabbed;
@@ -572,9 +587,16 @@ document.querySelectorAll(".songbtn[data-song]").forEach((b) =>
 // the wand at the laptop, click, and the beam re-zeroes (wandio.recal).
 el("recal").addEventListener("click", () => {
   conn.send({ t: P.WAND_RECAL, tw: Math.round(performance.now()) });
-  el("recal").textContent = "🎯 aim re-zeroed ✓";
-  setTimeout(() => { el("recal").textContent = "🎯 recalibrate — point at laptop, click"; }, 1500);
+  el("recal").textContent = "🎯 neutral set — music reset ✓";
+  setTimeout(() => { el("recal").textContent = "🎯 recalibrate — hold neutral, click"; }, 1500);
 });
+// Pose teaching: hold the wand in a pose, click its button — the server
+// records the live sensor reading; classification = nearest taught pose.
+document.querySelectorAll(".posebtn").forEach((b) =>
+  b.addEventListener("click", () => {
+    conn.send({ t: P.WAND_POSE_CAPTURE, pose: b.dataset.pose });
+    b.textContent = "✓ " + b.textContent.replace(/^✓ /, "");
+  }));
 
 // camera hub — seamless: the camera wand is simply ON. The iframe loads at
 // boot (its page auto-starts the webcam; the browser's permission prompt is

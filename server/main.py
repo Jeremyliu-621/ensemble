@@ -42,9 +42,8 @@ from config import (
     SONG_CACHE,
     WS_PATH,
 )
-from engine.candidates import GENERATORS
 from engine.conductor import Conductor
-from gestures.strokes import StrokeTracker
+from gestures.strokes import LIFT_SIGN, StrokeTracker
 from hub import ClientConn, Hub, send_json
 from imu_telemetry import ImuTelemetry
 from network_address import address_score, format_url_host
@@ -55,7 +54,6 @@ from showlog import ShowLog
 from static_files import build_static_response, redirect_response
 from wandio import ShakeDetector, WandAimer, WandRouter
 
-PAD_CANDIDATES = list(GENERATORS)   # MPR121 pads 0-5 force these; pad up = auto
 SELECT_ALL_LATCH_MS = 1500.0        # shake holds aim at "all" this long before pointing resumes control
 
 # CV wand, DET mode, pinch-drag: the webcam's answer to the hardware wand's
@@ -118,6 +116,7 @@ class App:
         self.shake = ShakeDetector()
         self._select_all_until = 0.0            # server-ms; aim forced to None until this passes
         self.strokes = StrokeTracker()          # live stroke intent for the panel
+        self._load_wand_poses()                 # captured pose calibration survives restarts
         self.showlog = ShowLog(DEFAULT_SESSION)
         self.announcer = Announcer(self._announce_line)
         self.imu_telemetry = ImuTelemetry()
@@ -175,6 +174,27 @@ class App:
                     json.dumps(grid), encoding="utf-8")
         except OSError as e:
             log.warning("song cache save failed: %s", e)
+
+    # --- captured wand poses persist across restarts (the calibration IS the
+    # product here — losing it on reboot would mean re-teaching every pose) ---
+    def _save_wand_poses(self) -> None:
+        try:
+            from config import DATA_DIR
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            (DATA_DIR / "wand_poses.json").write_text(
+                json.dumps(self.strokes.get_poses()), encoding="utf-8")
+        except OSError as e:
+            log.warning("wand pose save failed: %s", e)
+
+    def _load_wand_poses(self) -> None:
+        try:
+            from config import DATA_DIR
+            path = DATA_DIR / "wand_poses.json"
+            if path.exists():
+                self.strokes.set_poses(json.loads(path.read_text(encoding="utf-8")))
+                log.info("wand poses restored: %s", sorted(self.strokes.get_poses()))
+        except Exception as e:  # noqa: BLE001 - bad calibration must never block boot
+            log.warning("wand pose restore failed: %s", e)
 
     def _default_song(self) -> None:
         """No cached song: the demo boots straight into the flagship piece
@@ -483,9 +503,23 @@ class App:
         # The performer's other hand: CV-palm / wand hardware may drive transport
         # and SELECT-mode aiming (only these verbs — a rogue wand can pause the
         # show or solo a phone, never load songs or change volumes).
-        if (t == P.ADMIN_CMD and conn.role in P.WAND_ROLES
-                and msg.get("cmd") in ("start", "stop", "rewind", "forward", "aim")):
-            await self._admin(msg.get("cmd"), msg.get("args") or {})
+        if t == P.ADMIN_CMD and conn.role in P.WAND_ROLES:
+            # The camera is TRANSPORT-ONLY: play/pause, nothing the wand does
+            # (no aiming, no timeline scrubs). Real wands keep the full set.
+            verbs = (("start", "stop") if conn.role == "wand-cv"
+                     else ("start", "stop", "rewind", "forward", "aim"))
+            if msg.get("cmd") in verbs:
+                await self._admin(msg.get("cmd"), msg.get("args") or {})
+            else:
+                await send_json(conn.ws, {"t": P.ERR, "code": "forbidden",
+                                          "msg": "wand/camera may only drive transport"})
+            return
+
+        # Conducting, modes, and gesture streams belong to the WAND (hw/sim).
+        # The camera must never produce results the wand does — a stray finger
+        # count flipping det/ai mid-performance was exactly that bug.
+        if conn.role == "wand-cv" and t in (P.WAND_MODE, P.WAND_POSE, P.WAND_GRAB,
+                                            P.WAND_IMU, P.WAND_GESTURE):
             return
 
         # Show control: only the stage/editor may drive the show — the join QR
@@ -544,7 +578,13 @@ class App:
                 await self._cv_expression(frames)
             return
         if t == P.WAND_GRAB:
-            if self.session.wand.mode != "det":  # det mode: continuous control, no gesture windows
+            # Grab windows are the SIMULATOR page's mechanism only now. The
+            # hardware wand's ToF fires grabs whenever a hand is within 10cm —
+            # i.e. constantly while holding it — which both SUPPRESSED the pose
+            # wire (wand.grabbing) and, on release, fed raw-motion windows to
+            # the legacy feature extractor (the phantom swell arcs). The hw
+            # vocabulary is poses + pads; its grabs are ignored.
+            if conn.role == "wand-sim" and self.session.wand.mode != "det":
                 self.wand.on_grab(msg.get("state", ""), server_time_ms())
             elif self.session.wand.variant == "cv":
                 self._cv_on_grab(msg.get("state", ""))
@@ -561,16 +601,8 @@ class App:
             if changed:
                 self.session.wand.mode = mode
                 self.wand.reset()               # a mid-grab toggle must not strand a window
-                self._cv_pinching = False       # ...nor strand a CV pinch-drag
-                self._cv_speed_buf = []
-                self._cv_last_speed = 0.0
-                self._cv_last_gain, self._cv_last_gain_ms = 1.0, 0.0
-                if mode == "det":
-                    # Anchor the tempo dial to wherever the show actually sits
-                    # as DET is entered, so repeated pinches don't drift off
-                    # our own earlier set_tempo() calls.
-                    self._cv_tempo_ref_bpm = self.engine.base_bpm
-                self._cv_last_bpm, self._cv_last_bpm_ms = self.engine.base_bpm, 0.0
+                self.engine.reset_conducting()  # fresh neutral: no hush/harmony residue
+                                                # bleeding into the new mode
                 # Any mode/param change releases the previous warp everywhere, so a
                 # parameter never sticks after the wand stops controlling it.
                 await self.hub.broadcast({"t": P.FX_EXPR, "section": P.SECTION_ALL,
@@ -595,8 +627,29 @@ class App:
         if t == P.WAND_RANGE:                   # ToF distance -> proximity tension
             await self._wand_range(float(msg.get("mm", -1.0)))
             return
+        if t == P.WAND_POSE_CAPTURE and conn.role in ("stage", "admin"):
+            pose = str(msg.get("pose", "")).upper()
+            if pose in ("NEUTRAL", "HARMONY", "ARPEGGIO", "RUNS", "HUSH"):
+                ok = self.strokes.capture(pose)
+                if ok:
+                    self._save_wand_poses()
+                await send_json(conn.ws, {"t": P.WAND_STATE, "pose_captured": pose if ok else None,
+                                          "poses": sorted(self.strokes.get_poses())})
+            return
+
         if t == P.WAND_RECAL:
             self.aimer.recal()
+            self.strokes.recal()                # beam and pose zones share one "forward"
+            # Recal = back to DEFAULT: current pose is neutral AND the music
+            # returns to the song as written — envelope, arcs, section edits,
+            # and any lingering expression warp all clear.
+            self.engine.reset_conducting()
+            self._tension = 0.0
+            await self.hub.broadcast({"t": P.FX_EXPR, "section": P.SECTION_ALL,
+                                      "semis": 0, "gain": 1.0}, roles=("section", "stage"))
+            await self.hub.broadcast({"t": P.FX_TENSION, "section": P.SECTION_ALL,
+                                      "value": 0.0}, roles=("section", "stage"))
+            self.showlog.record("wand.recal")
             return
         if t == P.STAGE_ASSIGN:
             await self._assign_instrument(msg.get("section_id"), msg.get("instrument"))
@@ -793,7 +846,8 @@ class App:
         if not row or len(row) < 3:
             return
         try:
-            tilt = max(-1.0, min(1.0, float(row[2]) / 9.8))   # ay = the lift axis
+            tilt = max(-1.0, min(1.0, LIFT_SIGN * float(row[2]) / 9.8))   # ay = the lift
+                                                             # axis; WM_LIFT_SIGN flips it
         except (TypeError, ValueError):
             return
         now = server_time_ms()
@@ -936,18 +990,29 @@ class App:
                                   "imu": self.imu_telemetry.snapshot()},
                                  roles=("stage", "admin"))
 
+    # MPR121 pads = the DETERMINISTIC device triggers: physical buttons, no
+    # sensor physics anywhere. Press = the device fires at the next bar; the
+    # envelope breathes back on its own (pad up needs no action).
+    PAD_DEVICES = ("HARMONY", "HUSH", "RUNS", "ARPEGGIO")
+
     async def _wand_touch(self, pad: int, state: str) -> None:
-        if state == "down" and 0 <= pad < len(PAD_CANDIDATES):
-            self.engine.set_forced(PAD_CANDIDATES[pad])
-            self.showlog.record("wand.touch", pad=pad, forced=PAD_CANDIDATES[pad])
-        elif state == "up":
-            self.engine.set_forced(None)
-        else:
-            return  # pads >= len(PAD_CANDIDATES) are reserved for hardware-side modes
-        await self._broadcast_roster()
+        if state == "down" and 0 <= pad < len(self.PAD_DEVICES):
+            device = self.PAD_DEVICES[pad]
+            self.engine.on_stroke(device, {}, server_time_ms())
+            self.showlog.record("wand.touch", pad=pad, device=device)
+            await self._broadcast_roster()
 
     async def _wand_range(self, mm: float) -> None:
         if mm < 0:
+            return
+        # Proximity->tension is a DET-mode instrument only. In AI mode the ToF
+        # is the squeeze-grab sensor — without this gate, a hand (or table)
+        # within 600mm washed the filter mid-performance in any mode.
+        if self.session.wand.mode != "det":
+            if self._tension > 0.0:
+                self._tension = 0.0
+                await self.hub.broadcast({"t": P.FX_TENSION, "section": P.SECTION_ALL,
+                                          "value": 0.0}, roles=("section", "stage"))
             return
         # 600mm+ away = open; closing to 100mm sweeps the tension to full.
         tension = max(0.0, min(1.0, (600.0 - mm) / 500.0))

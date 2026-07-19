@@ -203,8 +203,11 @@ def main() -> int:
     units()
     shows_dir = tempfile.mkdtemp(prefix="wm-rework-")
     env = dict(os.environ)
-    env.update({"WM_HTTP_PORT": str(PORT), "WM_DECISION_LOG": "0",
-                "WM_SHOWS_DIR": shows_dir,
+    # WM_HTTPS_PORT must move too: with certs/ present the spawned server also
+    # binds the TLS port, and the default 8443 collides with a live show server.
+    env.update({"WM_HTTP_PORT": str(PORT), "WM_HTTPS_PORT": str(PORT + 1),
+                "WM_DECISION_LOG": "0", "WM_SHOWS_DIR": shows_dir,
+                "WM_DISCOVERY_OFF": "1",
                 "WM_SESSION_FILE": str(pathlib.Path(shows_dir) / "session.json")})
     server = subprocess.Popen([sys.executable, str(REPO / "server" / "main.py")], env=env,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

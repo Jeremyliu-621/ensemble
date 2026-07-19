@@ -94,23 +94,24 @@ async def strokes_mode(loops: int) -> None:
     def gyro(name, gx=0.0, gz=0.0, dur=0.45):
         return (name, lambda t: (0.0, 0.0, 9.81, gx, 0.0, gz), dur)
 
-    def circle(t):
-        w = 2 * _m.pi / 0.6
-        return (0.0, 0.0, 9.81, 260.0 * _m.sin(w * t), 0.0, 260.0 * _m.cos(w * t))
+    def pose(name, ax=0.0, ay=0.0, az=9.81, dur=1.6):
+        """A held orientation: gravity sits on the given axes, no motion."""
+        return (name, lambda t: (ax, ay, az, 0.0, 0.0, 0.0), dur)
 
-    def stab(t):
-        return (14.0 if 0.10 <= t < 0.18 else 0.0, 0.0, 9.81, 0.0, 0.0, 0.0)
+    def turn_hold(name, gz, dur=1.8):
+        """Yaw-turn for 0.5s, then hold still: enters a POINT_LEFT/RIGHT zone.
+        Yaw INTEGRATES across segments, so the script must return to zero."""
+        return (name, lambda t: (0.0, 0.0, 9.81, 0.0, 0.0, gz if t < 0.5 else 0.0), dur)
 
     def shake(t):
         return (9.0 * _m.sin(2 * _m.pi * 7 * t), 0.0, 9.81, 0.0, 0.0, 0.0)
 
     SCRIPT = [
-        gyro("RIGHT_SWIPE", gz=120.0),
-        gyro("LEFT_SWIPE", gz=-120.0),
-        gyro("RAISE", gx=100.0),
-        gyro("LOWER", gx=-100.0),
-        ("CIRCLE", circle, 1.2),
-        ("STAB", stab, 0.4),
+        turn_hold("ARPEGGIO (right pole)", 168.0),     # yaw 0 -> +84
+        turn_hold("RUNS (left pole)", -336.0),         # +84 -> -84
+        turn_hold("recenter", 168.0),                  # -84 -> 0 (commits nothing)
+        pose("HARMONY (up pole)", ay=9.81, az=0.0),
+        pose("HUSH (down pole)", ay=-9.81, az=0.0),
         ("SHAKE", shake, 0.7),
     ]
 

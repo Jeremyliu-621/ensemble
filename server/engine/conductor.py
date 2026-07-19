@@ -221,23 +221,28 @@ class Conductor:
     def on_gesture(self, window: GestureWindow) -> None:
         self._gesture_in(extract_features(window), window.t_end_server_ms)
 
-    # Each committed stroke is a FIXED device — one movement, one meaning,
-    # every time. Live-meter vigor scaling was tried and cut: real-hardware
-    # meters read near zero at commit time (the 0.7s window has decayed), so
-    # vigor-scaled swipes landed too weak to engage anything. Deterministic
-    # bands are what a performer can actually rehearse:
-    #   sweep RIGHT = harmony blooms      sweep LEFT = passing runs
-    #   CIRCLE/SHAKE = arpeggio           point/RAISE up = swell arc
-    #   point/LOWER down = hush           STAB = accent only
+    # Each pose zone is a FIXED device — one position, one meaning, every
+    # time, holdable without a steady hand:
+    #   point UP = swell arc          point DOWN = hush (held = stays hushed)
+    #   point RIGHT = harmony blooms  point LEFT = passing runs
+    #   wrist ROLL (either way) = arpeggio    SHAKE = arpeggio burst
+    # The wand's ENTIRE musical vocabulary: four device-named poles.
+    # (SHAKE deliberately absent — it's the select-all signal, not music.)
     _STROKE_MAP = {
-        "RIGHT_SWIPE": GestureFeatures(energy=0.85, size=0.75, duration=0.7),
-        "LEFT_SWIPE":  GestureFeatures(energy=0.72, size=0.70, duration=0.7),
-        "RAISE":       GestureFeatures(energy=0.55, size=0.50, vertical=0.9, duration=1.0),
-        "LOWER":       GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0),
-        "CIRCLE":      GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
-        "STAB":        GestureFeatures(energy=0.90, size=0.40, duration=0.25),
-        "SHAKE":       GestureFeatures(energy=1.00, size=0.90, duration=0.7),
+        "HARMONY":  GestureFeatures(energy=0.85, size=0.75, duration=0.7),
+        "ARPEGGIO": GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
+        "RUNS":     GestureFeatures(energy=0.72, size=0.70, duration=0.7),
+        "HUSH":     GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0),
     }
+
+    def reset_conducting(self) -> None:
+        """Back to neutral instantly: mode flips (ai <-> det) must not carry
+        hush/harmony residue — the envelope, arcs, per-section overrides and
+        any pending pickup all clear; the song plays as written."""
+        self._global = _ConductState()
+        self._sec_state.clear()
+        self._pickup = None
+        self._decision = None
 
     def on_stroke(self, label: str, meters: dict, server_ms: float) -> None:
         """A committed stroke from the CONTINUOUS hardware-wand stream (no grab
@@ -247,6 +252,15 @@ class Conductor:
         f = self._STROKE_MAP.get(label)
         if f is None:                                  # STILL etc: envelope relaxes on its own
             return
+        # A deliberate pose/pad is a COMMAND, not a nudge: snap the envelope
+        # most of the way immediately so the device lands at the NEXT bar,
+        # not two bars later (the slow chase stays for the breathe-back).
+        state = self._target_state_for_push()
+        target = 0.6 * f.energy + 0.4 * f.size
+        if f.rotation > 0.5:
+            target = max(target, 0.5 + 0.35 * f.rotation)
+        if not self._is_stab(f):
+            state.intensity += (max(0.0, min(1.0, target)) - state.intensity) * 0.7
         log.info("stroke %s -> %s", label, {k: round(v, 2) for k, v in f.as_dict().items()})
         self._gesture_in(f, server_ms)
 

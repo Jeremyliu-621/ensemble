@@ -98,6 +98,9 @@ class WandAimer:
     def __init__(self) -> None:
         self.yaw = 0.0
         self._last_tw: float | None = None
+        self._bias = 0.0                # learned at-rest gyro bias (deg/s) — the
+                                        # real board reads ~1 deg/s while still,
+                                        # ~55 deg/min of phantom beam rotation
 
     def on_frames(self, frames: list[list[float]]) -> None:
         for f in frames:
@@ -105,12 +108,15 @@ class WandAimer:
                 continue
             try:
                 tw, gz = float(f[0]), float(f[YAW_AXIS]) * YAW_SIGN
+                gmag = math.sqrt(f[4] * f[4] + f[5] * f[5] + f[6] * f[6])
             except (TypeError, ValueError):
                 continue
+            if gmag < 3.0:              # still enough that the reading IS bias
+                self._bias += (gz - self._bias) * 0.02
             if self._last_tw is not None:
                 dt = (tw - self._last_tw) / 1000.0
                 if 0.0 < dt < 0.5:
-                    self.yaw = _wrap_deg(self.yaw + gz * dt)
+                    self.yaw = _wrap_deg(self.yaw + (gz - self._bias) * dt)
             self._last_tw = tw
 
     def recal(self) -> None:

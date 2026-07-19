@@ -38,18 +38,34 @@ RAISE_DEG = 30.0      # net pitch travel for raise/lower
 CIRCLE_ROT_DEG = 260.0  # cumulative rotation with little net travel -> circle
 STAB_ACC = 12.0       # linear-accel spike (m/s^2) — high: real swipes peak past 8
 STAB_TRAVEL = 20.0    # a stab goes nowhere: net yaw+pitch travel must stay tiny
-TILT_G = 0.55         # |gravity along the wand's lift axis|/g to count as pointed
-TILT_HOLD_MS = 600.0  # held that long (calmly) -> RAISE/LOWER commits
+# ── four extreme poles, RELATIVE to the calibrated neutral ───────────────────
+# Wherever the wand points at recal time (or its first calm hold) is NEUTRAL —
+# silence. The vocabulary is EXACTLY four near-90-degree poles from there:
+#   UP = harmony · DOWN = hush · LEFT = runs · RIGHT = arpeggio
+# Up/down read gravity (bulletproof). Left/right is the one axis an
+# accelerometer physically cannot see (rotation about gravity), so it rides
+# the gyro-integrated heading — recal re-zeroes it, and the 60-degree pole
+# keeps normal drift irrelevant.
+POLE_PITCH_DEG = 55.0  # tip up/down this far from neutral -> harmony/hush
+POLE_YAW_DEG = 60.0    # swung left/right this far from neutral -> runs/arpeggio
+POLE_LEVEL_DEG = 35.0  # left/right only count while the tip is level-ish
+ROLL_SIGN = float(os.environ.get("WM_ROLL_SIGN", "1"))   # -1 if rolls read mirrored
+LIFT_SIGN = float(os.environ.get("WM_LIFT_SIGN", "1"))   # -1 if raise/lower read swapped
+BASELINE_CALM_MS = 350.0  # first hold this calm = the auto-captured neutral
+POSE_MATCH_DEG = 32.0     # captured-template match radius (gravity+yaw combined)
+TILT_HOLD_MS = 600.0   # zone held that long (calmly) -> commits
 TILT_REFIRE_MS = 1400.0  # ...and re-commits while held, so a hush stays down
-TILT_CALM_RMS = 2.5   # tilt reads only while the wand is otherwise quiet
+TILT_CALM_RMS = 2.5    # poses read only while the wand is otherwise quiet
 SHAKE_REVERSALS = 4   # sign flips of the dominant linear axis
 SHAKE_RMS = 3.0       # ...with at least this much vigor
 
 _GRAV_ALPHA = 0.08    # gravity EMA
 _NOISE_ACC = 1.5      # ignore reversals below this (m/s^2)
 
-STROKES = ("LEFT_SWIPE", "RIGHT_SWIPE", "RAISE", "LOWER",
-           "CIRCLE", "STAB", "SHAKE", "STILL")
+# Motion detection was cut wholesale (false-fired on real hardware). The
+# vocabulary is four extreme poles held ~0.6s, named by their DEVICE. SHAKE
+# survives for select-all only — it makes no music.
+STROKES = ("HARMONY", "HUSH", "RUNS", "ARPEGGIO", "SHAKE", "STILL")
 
 
 class StrokeTracker:
@@ -65,8 +81,88 @@ class StrokeTracker:
         self._last_active = 0.0
         self._latched: str | None = None
         self._latch_until = 0.0
-        self._tilt_since: float | None = None  # when the current tilt-hold began
-        self._tilt_fired = 0.0                 # last tilt commit (for re-fire)
+        self._pose_zone: str | None = None     # which pose zone the wand is held in
+        self._tilt_since: float | None = None  # when the current pose-hold began
+        self._tilt_fired = 0.0                 # last pose commit (for re-fire)
+        self._yaw = 0.0                        # integrated yaw for LEFT/RIGHT zones
+        self._gyro_int = [0.0, 0.0, 0.0]       # ALL-axis rotation integrals (deg):
+                                               # mounting-agnostic heading for taught poses
+        self._gyro_bias = [0.0, 0.0, 0.0]      # learned at-rest bias (deg/s): the real
+                                               # wand reads ~1 deg/s while STILL, which
+                                               # integrates to ~55 deg of phantom turn/min
+        self._pitch0: float | None = None      # calibrated neutral pitch (deg)
+        self._roll0 = 0.0                      # calibrated neutral roll (deg)
+        self._base_calm_since: float | None = None
+        self._poses: dict = getattr(self, "_poses", {})   # captured templates
+                                               # survive reset (board reboot)
+
+    def _angles(self) -> tuple[float, float]:
+        """(pitch, roll) of the wand in degrees, from the gravity EMA."""
+        g = self._g or [0.0, 0.0, 9.8]
+        pitch = math.degrees(math.asin(max(-1.0, min(1.0, LIFT_SIGN * g[1] / 9.8))))
+        roll = math.degrees(math.atan2(g[0], g[2])) * ROLL_SIGN
+        return pitch, roll
+
+    def recal(self) -> None:
+        """The pose the wand is in RIGHT NOW becomes neutral. With captured
+        pose templates, re-anchor their yaws so 'here' matches the captured
+        NEUTRAL heading (gravity templates never drift; only yaw does).
+        Without templates, fall back to the relative-zone baseline."""
+        if self._poses.get("NEUTRAL"):
+            n_gi = self._poses["NEUTRAL"].get("gi", (0.0, 0.0, 0.0))
+            delta = [c - n for c, n in zip(self._gyro_int, n_gi)]
+            for t in self._poses.values():
+                gi = t.get("gi", (0.0, 0.0, 0.0))
+                t["gi"] = [g + d for g, d in zip(gi, delta)]
+            return
+        self._yaw = 0.0
+        if self._g is not None:
+            self._pitch0, self._roll0 = self._angles()
+        else:
+            self._pitch0 = None
+        self._base_calm_since = None
+
+    # ── captured-pose calibration: no axis/sign/mounting assumptions ─────────
+    # The conductor HOLDS each pose and clicks capture; classification is
+    # nearest captured template (gravity direction + yaw), so however the
+    # board is mounted, "the pose you showed me" is what fires.
+    def capture(self, name: str) -> bool:
+        """Record the current pose (unit gravity + all-axis rotation integrals)
+        under `name`. No axis/sign/mounting assumptions anywhere."""
+        if self._g is None:
+            return False
+        mag = math.sqrt(sum(x * x for x in self._g)) or 1.0
+        self._poses[name] = {"g": [x / mag for x in self._g],
+                             "gi": list(self._gyro_int)}
+        return True
+
+    def set_poses(self, poses: dict) -> None:
+        self._poses = {k: {"g": list(v["g"]),
+                           "gi": list(v.get("gi", (0.0, 0.0, 0.0)))}
+                       for k, v in (poses or {}).items()}
+
+    def get_poses(self) -> dict:
+        return self._poses
+
+    def _nearest_pose(self) -> str | None:
+        """Nearest captured template within POSE_MATCH_DEG; None if neutral,
+        too far from everything, or fewer than 2 templates exist."""
+        if len(self._poses) < 2 or "NEUTRAL" not in self._poses or self._g is None:
+            return None
+        mag = math.sqrt(sum(x * x for x in self._g)) or 1.0
+        gu = [x / mag for x in self._g]
+        best, best_d = None, 1e9
+        for name, t in self._poses.items():
+            dot = max(-1.0, min(1.0, sum(a * b for a, b in zip(gu, t["g"]))))
+            gangle = math.degrees(math.acos(dot))
+            gi = t.get("gi", (0.0, 0.0, 0.0))
+            headdiff = math.sqrt(sum((a - b) ** 2 for a, b in zip(self._gyro_int, gi)))
+            d = math.sqrt(gangle * gangle + (0.8 * headdiff) ** 2)
+            if d < best_d:
+                best, best_d = name, d
+        if best_d > POSE_MATCH_DEG or best == "NEUTRAL":
+            return None
+        return best
 
     def push(self, frames: list[list[float]]) -> tuple[str | None, dict, bool]:
         """Feed one batch. Returns (stroke, meters, committed_new).
@@ -107,23 +203,54 @@ class StrokeTracker:
         if la_mag > 1.0 or gyro_mag > 40.0:
             self._last_active = tw
 
-        # Tilt-hold: pointing the wand clearly UP or DOWN and holding it there
-        # calmly is the most robust cue we have — a pure gravity read, no
-        # motion-dynamics thresholds. Commits RAISE/LOWER after TILT_HOLD_MS
-        # and RE-commits while held, so "palms down" keeps the room hushed.
-        tilt = self._g[1] / 9.8
-        if abs(tilt) > TILT_G and la_mag < TILT_CALM_RMS:
-            if self._tilt_since is None:
-                self._tilt_since = tw
+        # Pose zones ARE the vocabulary — and they're RELATIVE to the
+        # calibrated neutral: wherever the wand pointed at recal (or its first
+        # calm hold) fires nothing; zones are departures from that pose, held
+        # calmly ~0.6s. A held zone RE-commits, so "pointed at the floor"
+        # keeps the room hushed. Switching zones restarts the hold clock.
+        # Gyro-bias learning: a still wand's gyro reading IS its bias — EMA it
+        # while quiet, subtract it from every integration. Measured on the real
+        # board: ~1 deg/s at rest = ~55 deg/min of phantom rotation without this.
+        if la_mag < 0.6 and gyro_mag < 3.0:
+            for k in range(3):
+                self._gyro_bias[k] += (float(f[4 + k]) - self._gyro_bias[k]) * 0.02
+        self._yaw += (yaw_rate - self._gyro_bias[YAW_AXIS - 4] * YAW_SIGN) * dt
+        for k in range(3):                       # per-axis integrals: no axis
+            self._gyro_int[k] += (float(f[4 + k]) - self._gyro_bias[k]) * dt
+        pitch, roll = self._angles()
+        if self._pitch0 is None:                 # auto-baseline: first calm hold
+            if la_mag < TILT_CALM_RMS:
+                if self._base_calm_since is None:
+                    self._base_calm_since = tw
+                elif tw - self._base_calm_since >= BASELINE_CALM_MS:
+                    self._pitch0, self._roll0 = pitch, roll
+            else:
+                self._base_calm_since = None
+        zone: str | None = None
+        if self._poses:                          # captured templates win outright
+            if la_mag < TILT_CALM_RMS:
+                zone = self._nearest_pose()
+        elif self._pitch0 is not None and la_mag < TILT_CALM_RMS:
+            dpitch = pitch - self._pitch0
+            if dpitch > POLE_PITCH_DEG:
+                zone = "HARMONY"                # tip to the ceiling
+            elif dpitch < -POLE_PITCH_DEG:
+                zone = "HUSH"                   # tip to the floor
+            elif abs(dpitch) < POLE_LEVEL_DEG and self._yaw > POLE_YAW_DEG:
+                zone = "ARPEGGIO"               # swung hard right
+            elif abs(dpitch) < POLE_LEVEL_DEG and self._yaw < -POLE_YAW_DEG:
+                zone = "RUNS"                   # swung hard left
+        if zone != self._pose_zone:
+            self._pose_zone = zone
+            self._tilt_since = tw if zone else None
+        elif zone is not None and self._tilt_since is not None:
             if (tw - self._tilt_since >= TILT_HOLD_MS
                     and tw - self._tilt_fired >= TILT_REFIRE_MS):
                 self._tilt_fired = tw
                 self._last_active = tw
-                self._latched = "RAISE" if tilt > 0 else "LOWER"
+                self._latched = zone
                 self._latch_until = tw + LATCH_MS
                 return True
-        else:
-            self._tilt_since = None
 
         if tw - self._last_step >= STEP_MS:
             self._last_step = tw
@@ -178,24 +305,12 @@ class StrokeTracker:
         if len(self._win) < 5:
             return False
         ft = self._features()
+        # SHAKE is the only surviving MOTION stroke (rapid reversals — robust
+        # without a steady hand, and select-all needs it). Everything else is
+        # pose zones, handled in _ingest.
         cand: str | None = None
-        # straight strokes must be DOMINANTLY one axis AND straight (a swipe's
-        # gyro direction is constant; a circle's rotates) — otherwise a
-        # circle's quarters read as swipes before the loop closes
-        straight = abs(ft["dir_rot"]) < math.radians(60.0)
-        yaw_dom = abs(ft["dyaw"]) > 0.65 * ft["rot"] and straight
-        pitch_dom = abs(ft["dpitch"]) > 0.65 * ft["rot"] and straight
         if ft["reversals"] >= SHAKE_REVERSALS and ft["la_rms"] > SHAKE_RMS:
             cand = "SHAKE"
-        elif (ft["peak"] > STAB_ACC and ft["rot"] < 60.0
-              and abs(ft["dyaw"]) < STAB_TRAVEL and abs(ft["dpitch"]) < STAB_TRAVEL):
-            cand = "STAB"           # a spike that TRAVELS is a swipe, not a stab
-        elif abs(ft["dir_rot"]) > math.radians(270.0):
-            cand = "CIRCLE"
-        elif abs(ft["dyaw"]) > SWIPE_DEG and yaw_dom:
-            cand = "RIGHT_SWIPE" if ft["dyaw"] > 0 else "LEFT_SWIPE"
-        elif abs(ft["dpitch"]) > RAISE_DEG and pitch_dom:
-            cand = "RAISE" if ft["dpitch"] > 0 else "LOWER"
         if cand is None:
             return False
         if cand == self._latched and tw < self._latch_until:
