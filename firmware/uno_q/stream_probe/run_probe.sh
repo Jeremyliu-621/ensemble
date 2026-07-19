@@ -12,6 +12,7 @@ SESSION="lol1"
 DURATION="30"
 KEEP_RUNNING=0
 DRY_RUN=0
+PREFLIGHT_ONLY=0
 
 usage() {
   printf '%s\n' \
@@ -29,6 +30,7 @@ usage() {
     '  --session NAME       Phoneharmonic session (default: lol1)' \
     '  --duration SECONDS   Guided test duration (default: 30)' \
     '  --keep-running       Leave the board app running after a successful test' \
+    '  --preflight-only     Run local static/dependency checks without contacting the board' \
     '  --dry-run            Validate arguments and print actions without mutation' \
     '  -h, --help           Show this help'
 }
@@ -74,6 +76,10 @@ while (($#)); do
       ;;
     --keep-running)
       KEEP_RUNNING=1
+      shift
+      ;;
+    --preflight-only)
+      PREFLIGHT_ONLY=1
       shift
       ;;
     --dry-run)
@@ -134,6 +140,12 @@ if [[ -z "$PYTHON_BIN" ]]; then
   exit 1
 fi
 
+MONITOR="$REPO_ROOT/server/tools/wand_monitor.py"
+STREAMER="$SCRIPT_DIR/python/main.py"
+BOARD_REQUIREMENTS="$SCRIPT_DIR/python/requirements.txt"
+SKETCH="$SCRIPT_DIR/sketch/sketch.ino"
+SKETCH_PROFILE="$SCRIPT_DIR/sketch/sketch.yaml"
+
 SERVER_IP="$("$PYTHON_BIN" "$REPO_ROOT/server/network_address.py" "$SERVER_IP")"
 if [[ "$SERVER_IP" == *:* ]]; then
   URL_HOST="[$SERVER_IP]"
@@ -152,17 +164,70 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
+echo "[probe] running local preflight checks"
+for required_file in \
+  "$SCRIPT_DIR/app.yaml" "$SCRIPT_DIR/README.md" \
+  "$STREAMER" "$BOARD_REQUIREMENTS" "$SKETCH" "$SKETCH_PROFILE" \
+  "$MONITOR" "$REPO_ROOT/server/network_address.py" "$REPO_ROOT/server/main.py"; do
+  if [[ ! -s "$required_file" ]]; then
+    echo "required probe file is missing or empty: $required_file" >&2
+    exit 1
+  fi
+done
+
+bash -n "$0"
+"$PYTHON_BIN" -m py_compile \
+  "$STREAMER" "$MONITOR" "$REPO_ROOT/server/network_address.py" "$REPO_ROOT/server/main.py"
+"$PYTHON_BIN" -c \
+  'import mido, serial, websockets; from websockets.asyncio.client import connect' || {
+  echo "local Python is missing compatible server dependencies; install server/requirements.txt" >&2
+  exit 1
+}
+"$PYTHON_BIN" "$MONITOR" --help >/dev/null
+
+"$PYTHON_BIN" - "$SKETCH_PROFILE" "$BOARD_REQUIREMENTS" "$STREAMER" "$SKETCH" <<'PY'
+from pathlib import Path
+import sys
+
+profile = Path(sys.argv[1]).read_text(encoding="utf-8")
+requirements = Path(sys.argv[2]).read_text(encoding="utf-8")
+streamer = Path(sys.argv[3]).read_text(encoding="utf-8")
+sketch = Path(sys.argv[4]).read_text(encoding="utf-8")
+
+required_libraries = (
+    "Arduino_Modulino (0.9.0)",
+    "STM32duino VL53L4CD (1.0.5)",
+    "STM32duino VL53L4ED (1.0.1)",
+    "Arduino_LSM6DSOX (1.1.2)",
+    "Arduino_LPS22HB (1.0.2)",
+    "Arduino_HS300x (1.0.0)",
+    "ArduinoGraphics (1.1.5)",
+    "Arduino_LTR381RGB (1.0.1)",
+)
+missing = [library for library in required_libraries if library not in profile]
+if missing:
+    raise SystemExit(f"sketch profile is missing required libraries: {', '.join(missing)}")
+if "Arduino_RPClite (0.2.1)" in profile:
+    raise SystemExit("sketch profile pins obsolete Arduino_RPClite 0.2.1")
+if "websockets>=16,<17" not in requirements.replace(" ", ""):
+    raise SystemExit("board requirements must pin websockets>=16,<17")
+if 'Bridge.provide("imu_sample"' not in streamer:
+    raise SystemExit("board Python does not provide the imu_sample Bridge topic")
+if 'Bridge.notify("imu_sample"' not in sketch:
+    raise SystemExit("MCU sketch does not notify the imu_sample Bridge topic")
+PY
+
+echo "[probe] local preflight PASS"
+if [[ "$PREFLIGHT_ONLY" -eq 1 ]]; then
+  exit 0
+fi
+
 for command_name in ssh scp; do
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "required command not found: $command_name" >&2
     exit 1
   fi
 done
-
-"$PYTHON_BIN" -c 'import mido, serial, websockets' || {
-  echo "local Python is missing server dependencies; install server/requirements.txt" >&2
-  exit 1
-}
 
 STAGE_DIR=""
 SERVER_PID=""
@@ -220,7 +285,6 @@ echo "[probe] compiling, flashing, and starting the UNO Q app"
 BOARD_STARTED=1
 ssh "$BOARD" "arduino-app-cli app start '$REMOTE_APP'"
 
-MONITOR="$REPO_ROOT/server/tools/wand_monitor.py"
 set +e
 "$PYTHON_BIN" "$MONITOR" --check-server --ip "$SERVER_IP" --port "$SERVER_PORT" --session "$SESSION"
 server_status=$?

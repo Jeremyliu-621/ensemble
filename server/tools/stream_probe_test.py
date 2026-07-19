@@ -306,6 +306,27 @@ class LauncherTests(unittest.TestCase):
     def test_shell_syntax(self) -> None:
         subprocess.run(["bash", "-n", str(LAUNCHER)], check=True)
 
+    def test_monitor_cli_runs_directly_from_repo_root(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(MONITOR_PATH), "--help"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--startup-timeout", result.stdout)
+
+    def test_preflight_checks_code_and_dependencies_without_board(self) -> None:
+        result = subprocess.run(
+            [str(LAUNCHER), "--board", "arduino@uno-q.local",
+             "--server-ip", "192.168.1.42", "--preflight-only"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("local preflight PASS", result.stdout)
+
     def test_dry_run_has_no_network_dependency(self) -> None:
         result = subprocess.run(
             [str(LAUNCHER), "--board", "arduino@uno-q.local",
