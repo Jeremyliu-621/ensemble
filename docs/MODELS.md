@@ -47,6 +47,26 @@ WM_BARMODEL_NAME back and drop the styles var). v3 becomes the new keeper only
 after it survives the ear test. Next: GRPO chained from this adapter
 (`init_from_adapter` in freesolo/barline/configs/rl.toml).
 
+## Fast serving — Fireworks dedicated (2026-07-18)
+
+v3 with the LoRA MERGED into the base (scratchpad/merge_lora.py, spot-verified
+bit-exact) serves on a Fireworks dedicated deployment: **453ms median / 746ms
+max** per composed bar (vs ~4.6s on the shared pool), judge mean 0.968, live
+styles 0.95-1.00. Details the next person needs:
+
+- Model + deployment live on Caellum's Fireworks org; HF mirror of the raw
+  adapter: `Caecae2k/wand-barline-v3`. Deployments MUST use the validated
+  shape `accounts/fireworks/deploymentShapes/qwen3p5-4b-minimal` (H200/FP8) —
+  a generic H100/bf16 deployment fails with an internal error.
+- Fireworks' qwen3_5 chat template returns the answer in `reasoning_content`
+  with `content` empty; both model clients fall back to it (ml/barmodel.py,
+  ml/policy.py).
+- Env (values NOT in the repo — ask Caellum): WM_BARMODEL_URL points at the
+  Fireworks OpenAI base, WM_BARMODEL_NAME is `model#deployment`,
+  WM_BARMODEL_PREFETCH=1 (one-bar horizon), WM_BARMODEL_TIMEOUT_MS=4000.
+- ~$7/hr while replicas are up; scale-to-zero after 30 idle min. Freesolo
+  serving of the un-merged v3 stays deployed as the free instant fallback.
+
 Ear verdicts on the ship-now devices (2026-07-18, Zora's Domain renders):
 harmonize + hush strongest, arpeggio + passing good, **echo CUT** (sounded
 out of place even after the underlap fix — remains in the trained styles but
