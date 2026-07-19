@@ -547,7 +547,13 @@ class App:
             self.wand.on_pose(msg.get("frames", []))
             return
         if t == P.WAND_GRAB:
-            if self.session.wand.mode != "det":  # det mode: continuous control, no gesture windows
+            # Grab windows are the SIMULATOR page's mechanism only now. The
+            # hardware wand's ToF fires grabs whenever a hand is within 10cm —
+            # i.e. constantly while holding it — which both SUPPRESSED the pose
+            # wire (wand.grabbing) and, on release, fed raw-motion windows to
+            # the legacy feature extractor (the phantom swell arcs). The hw
+            # vocabulary is poses + pads; its grabs are ignored.
+            if conn.role == "wand-sim" and self.session.wand.mode != "det":
                 self.wand.on_grab(msg.get("state", ""), server_time_ms())
             return
         if t == P.WAND_MODE:                    # physical toggle: ai composes / det controls

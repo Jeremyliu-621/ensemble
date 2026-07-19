@@ -252,6 +252,15 @@ class Conductor:
         f = self._STROKE_MAP.get(label)
         if f is None:                                  # STILL etc: envelope relaxes on its own
             return
+        # A deliberate pose/pad is a COMMAND, not a nudge: snap the envelope
+        # most of the way immediately so the device lands at the NEXT bar,
+        # not two bars later (the slow chase stays for the breathe-back).
+        state = self._target_state_for_push()
+        target = 0.6 * f.energy + 0.4 * f.size
+        if f.rotation > 0.5:
+            target = max(target, 0.5 + 0.35 * f.rotation)
+        if not self._is_stab(f):
+            state.intensity += (max(0.0, min(1.0, target)) - state.intensity) * 0.7
         log.info("stroke %s -> %s", label, {k: round(v, 2) for k, v in f.as_dict().items()})
         self._gesture_in(f, server_ms)
 
