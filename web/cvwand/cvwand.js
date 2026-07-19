@@ -202,11 +202,11 @@ function processHand(lm, now) {
   const pinchRatio = dist(lm[THUMB_TIP], lm[INDEX_TIP]) / handW;
   const xm = 1 - tip.x;   // mirror x for a selfie-natural feel
 
-  // ── discrete gesture layer: debounced, drives modes/transport/cv.state ────
-  const g = classify(lm, pinchRatio);
-  if (g === rawGesture) rawCount++;
-  else { rawGesture = g; rawCount = 1; }
-  if (rawCount === STABLE_FRAMES && g !== cvGesture) commitGesture(g, xm);
+  // ── discrete gesture layer: smoothed + debounced, drives transport/cv.state ──
+  const slm = smoothLandmarks(lm);
+  const sHandW = dist(slm[INDEX_MCP], slm[PINKY_MCP]) || 0.001;
+  const sPinchRatio = dist(slm[THUMB_TIP], slm[INDEX_TIP]) / sHandW;
+  updateGesture(classify(slm, sPinchRatio), xm, now);
   tickTransportHold(now);
 
   // Conducting pinch, mode poses, select/aim, and the pose stream are all
@@ -239,6 +239,44 @@ function classify(lm, pinchRatio) {
   if (f[0] && f[1] && n === 2) return "TWO_FINGERS";
   if (f[0] && f[1] && f[2] && n === 3) return "THREE_FINGERS";
   return null;
+}
+
+// EMA landmark smoothing, used only for discrete-gesture classification — raw
+// per-frame landmarks are too jittery for finger-count geometry.
+function smoothLandmarks(lm) {
+  if (!smoothLm || smoothLm.length !== lm.length) {
+    smoothLm = lm.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+    return smoothLm;
+  }
+  for (let i = 0; i < lm.length; i++) {
+    smoothLm[i].x += SMOOTH_ALPHA * (lm[i].x - smoothLm[i].x);
+    smoothLm[i].y += SMOOTH_ALPHA * (lm[i].y - smoothLm[i].y);
+    smoothLm[i].z += SMOOTH_ALPHA * (lm[i].z - smoothLm[i].z);
+  }
+  return smoothLm;
+}
+
+// Confirm a new gesture only after CONFIRM_FRAMES consecutive frames, and only
+// drop an active one after RELEASE_FRAMES consecutive misses — a single noisy
+// classification can neither restart a hold nor prematurely end one.
+function updateGesture(g, xm, now) {
+  if (cvGesture !== null) {
+    if (g === cvGesture) { missCount = 0; return; }
+    missCount++;
+    if (missCount < RELEASE_FRAMES) return;
+    missCount = 0;
+    candGesture = g; candCount = g ? 1 : 0;
+    commitGesture(null, xm);          // release: drop to neutral
+    return;
+  }
+  if (!g) { candGesture = null; candCount = 0; return; }
+  if (g === candGesture) candCount++;
+  else { candGesture = g; candCount = 1; }
+  if (candCount >= CONFIRM_FRAMES && now - lastCommitMs >= COMMIT_COOLDOWN_MS) {
+    lastCommitMs = now;
+    candGesture = null; candCount = 0;
+    commitGesture(g, xm);
+  }
 }
 
 // The camera is TRANSPORT-ONLY (the wand owns conducting, modes, and aim —
