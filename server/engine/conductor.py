@@ -242,6 +242,15 @@ class Conductor:
         "SHAKE":       GestureFeatures(energy=1.00, size=0.90, duration=0.7),
     }
 
+    def reset_conducting(self) -> None:
+        """Back to neutral instantly: mode flips (ai <-> det) must not carry
+        hush/harmony residue — the envelope, arcs, per-section overrides and
+        any pending pickup all clear; the song plays as written."""
+        self._global = _ConductState()
+        self._sec_state.clear()
+        self._pickup = None
+        self._decision = None
+
     def on_stroke(self, label: str, meters: dict, server_ms: float) -> None:
         """A committed stroke from the CONTINUOUS hardware-wand stream (no grab
         edges — StrokeTracker segments the motion, including the tilt-hold

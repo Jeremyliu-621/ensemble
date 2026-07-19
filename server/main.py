@@ -460,9 +460,23 @@ class App:
         # The performer's other hand: CV-palm / wand hardware may drive transport
         # and SELECT-mode aiming (only these verbs — a rogue wand can pause the
         # show or solo a phone, never load songs or change volumes).
-        if (t == P.ADMIN_CMD and conn.role in P.WAND_ROLES
-                and msg.get("cmd") in ("start", "stop", "rewind", "forward", "aim")):
-            await self._admin(msg.get("cmd"), msg.get("args") or {})
+        if t == P.ADMIN_CMD and conn.role in P.WAND_ROLES:
+            # The camera is TRANSPORT-ONLY: play/pause, nothing the wand does
+            # (no aiming, no timeline scrubs). Real wands keep the full set.
+            verbs = (("start", "stop") if conn.role == "wand-cv"
+                     else ("start", "stop", "rewind", "forward", "aim"))
+            if msg.get("cmd") in verbs:
+                await self._admin(msg.get("cmd"), msg.get("args") or {})
+            else:
+                await send_json(conn.ws, {"t": P.ERR, "code": "forbidden",
+                                          "msg": "wand/camera may only drive transport"})
+            return
+
+        # Conducting, modes, and gesture streams belong to the WAND (hw/sim).
+        # The camera must never produce results the wand does — a stray finger
+        # count flipping det/ai mid-performance was exactly that bug.
+        if conn.role == "wand-cv" and t in (P.WAND_MODE, P.WAND_POSE, P.WAND_GRAB,
+                                            P.WAND_IMU, P.WAND_GESTURE):
             return
 
         # Show control: only the stage/editor may drive the show — the join QR
@@ -526,6 +540,8 @@ class App:
             if changed:
                 self.session.wand.mode = mode
                 self.wand.reset()               # a mid-grab toggle must not strand a window
+                self.engine.reset_conducting()  # fresh neutral: no hush/harmony residue
+                                                # bleeding into the new mode
                 # Any mode/param change releases the previous warp everywhere, so a
                 # parameter never sticks after the wand stops controlling it.
                 await self.hub.broadcast({"t": P.FX_EXPR, "section": P.SECTION_ALL,

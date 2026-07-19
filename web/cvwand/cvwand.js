@@ -191,28 +191,11 @@ function processHand(lm, now) {
   if (g === rawGesture) rawCount++;
   else { rawGesture = g; rawCount = 1; }
   if (rawCount === STABLE_FRAMES && g !== cvGesture) commitGesture(g, xm);
+  tickTransportHold(now);
 
-  // ── conducting pinch: INSTANT in AI mode (the feel stays exactly as-is) ───
-  if (cvMode === "AI") {
-    if (!grabbed && pinchRatio < GRAB_ON) startGrab(now);
-    else if (grabbed && pinchRatio > GRAB_OFF) endGrab(now);
-  } else if (grabbed) {
-    endGrab(now);                       // left AI mode mid-grab: close the window
-  }
-
-  // ── mode behaviours ───────────────────────────────────────────────────────
-  if (cvMode === "SELECT" && cvGesture !== "PINCH") {
-    if (detectShake(xm, now)) selectAll(now);
-    else if (now >= selectAllUntil) aimAt(xm, now);
-  }
-  // Rewind/forward via pinch-drag is disabled for now: the bar jump wasn't
-  // landing reliably. Pinch still classifies normally for cv.state/mode use,
-  // it just no longer drives the timeline.
-
-  // Pose frame stream (the server only buffers these inside AI-mode grabs).
-  const roll = Math.atan2(lm[MIDDLE_MCP].y - lm[WRIST].y, lm[MIDDLE_MCP].x - lm[WRIST].x) * 180 / Math.PI;
-  poseBuf.push([Math.round(now), +xm.toFixed(4), +tip.y.toFixed(4), +tip.z.toFixed(4), +roll.toFixed(1)]);
-  if (poseBuf.length >= POSE_BATCH) flushPose();
+  // Conducting pinch, mode poses, select/aim, and the pose stream are all
+  // CUT: the camera is transport-only now (server enforces it too — wand.*
+  // from the cv role is dropped). The wand conducts; the camera plays/pauses.
 
   trail.push({ xm, y: tip.y, grabbed });
   if (trail.length > TRAIL_LEN) trail.shift();
@@ -238,16 +221,31 @@ function classify(lm, pinchRatio) {
   return null;
 }
 
+// The camera is TRANSPORT-ONLY (the wand owns conducting, modes, and aim —
+// a finger count must never flip det/ai mid-performance). And transport needs
+// COMMITMENT: hold the pose ~1.2s before it fires, so a passing open hand
+// can't stop the show.
+const TRANSPORT_HOLD_MS = 1200;
+let holdSince = 0, holdFired = false;
+
 function commitGesture(g, xm) {
   cvGesture = g;
-  if (g === "PALM" && !playing) {
-    playing = true; send({ t: P.ADMIN_CMD, cmd: "start" }); flashCmd("✋ play");
-  } else if (g === "FIST" && playing) {
-    playing = false; send({ t: P.ADMIN_CMD, cmd: "stop" }); flashCmd("✊ pause");
-  } else if (g === "ONE_FINGER") setMode("SELECT");
-  else if (g === "TWO_FINGERS") setMode("DETERMINISTIC");
-  else if (g === "THREE_FINGERS") setMode("AI");
+  holdSince = performance.now();
+  holdFired = false;
+  if (g === "PALM" && !playing) flashCmd("✋ hold to play…");
+  else if (g === "FIST" && playing) flashCmd("✊ hold to pause…");
   sendCvState();
+}
+
+function tickTransportHold(now) {
+  if (holdFired || !cvGesture || now - holdSince < TRANSPORT_HOLD_MS) return;
+  if (cvGesture === "PALM" && !playing) {
+    playing = true; holdFired = true;
+    send({ t: P.ADMIN_CMD, cmd: "start" }); flashCmd("✋ play");
+  } else if (cvGesture === "FIST" && playing) {
+    playing = false; holdFired = true;
+    send({ t: P.ADMIN_CMD, cmd: "stop" }); flashCmd("✊ pause");
+  }
 }
 
 function setMode(m) {
