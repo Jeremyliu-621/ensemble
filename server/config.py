@@ -67,6 +67,9 @@ SESSION_FILE = pathlib.Path(os.environ.get("WM_SESSION_FILE", str(SERVER_DIR / "
 # Last loaded/edited song, restored on boot — a restart must never silently
 # revert the show to the built-in loop.
 SONG_CACHE = pathlib.Path(os.environ.get("WM_SONG_CACHE", str(SERVER_DIR / "data" / "last_song")))
+# What a FRESH boot (no cached song) plays: the demo's flagship piece, loaded
+# from songs/ so "start the show" never lands on the built-in synth loop.
+DEFAULT_SONG = os.environ.get("WM_DEFAULT_SONG", "zelda-fairy.mid")
 
 # UDP discovery beacon: the wand board finds this server with no typed
 # commands (see server/discovery.py). WM_DISCOVERY_OFF=1 disables.

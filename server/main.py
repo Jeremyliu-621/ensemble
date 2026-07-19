@@ -149,6 +149,20 @@ class App:
         except OSError as e:
             log.warning("song cache save failed: %s", e)
 
+    def _default_song(self) -> None:
+        """No cached song: the demo boots straight into the flagship piece
+        (WM_DEFAULT_SONG in songs/, Great Fairy Fountain) instead of the
+        built-in loop, so 'start the show' is always the real thing."""
+        from config import DEFAULT_SONG, REPO_DIR
+        path = REPO_DIR / "songs" / DEFAULT_SONG
+        if not path.exists():
+            return
+        from engine.midi_load import load_midi_bytes
+        song, tracks = load_midi_bytes(path.read_bytes(), path.name)
+        self.engine.load_song(song, tracks)
+        log.info("default song '%s' loaded (%d bars, %d parts)",
+                 song.name, len(song.bars), len(tracks))
+
     def _restore_song(self) -> None:
         """On boot, reload whichever landed last: the dropped MIDI or an edit."""
         try:
@@ -156,6 +170,7 @@ class App:
             pick = max((p for p in (mid, grid) if p.exists()),
                        key=lambda p: p.stat().st_mtime, default=None)
             if pick is None:
+                self._default_song()
                 return
             if pick == grid:
                 from engine.midi_load import build_song_from_grid
@@ -173,7 +188,11 @@ class App:
             log.info("restored last song '%s' (%d bars, %d parts)",
                      song.name, len(song.bars), len(tracks))
         except Exception as e:  # noqa: BLE001 - a bad cache must never block boot
-            log.warning("song restore failed (%s) — starting with the built-in loop", e)
+            log.warning("song restore failed (%s) — falling back to the default song", e)
+            try:
+                self._default_song()
+            except Exception as e2:  # noqa: BLE001
+                log.warning("default song failed too (%s) — built-in loop", e2)
 
     async def prune_loop(self) -> None:
         """Drop section slots that have been disconnected past the grace period,
