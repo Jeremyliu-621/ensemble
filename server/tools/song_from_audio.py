@@ -91,6 +91,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("source", help="YouTube URL or local audio file")
     ap.add_argument("--name", default="transcribed")
+    ap.add_argument("--raw", action="store_true",
+                    help="skip the Gemini musical-cleanup pass")
     args = ap.parse_args()
 
     out_dir = REPO / "songs"
@@ -121,6 +123,14 @@ def main() -> int:
     print(f"wrote {dest} (register-split into Treble/Mid/Bass)")
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+    if not args.raw:
+        import config as _cfg
+        if _cfg.GEMINI_KEY:
+            from gemini_clean import clean
+            try:
+                clean(dest)                     # arranger pass: melody/bass/harmony,
+            except Exception as e:              # noqa: BLE001 - raw file still usable
+                print(f"gemini cleanup skipped ({e}) — raw transcription kept")
     from engine.midi_load import load_midi_bytes
     song, parts = load_midi_bytes(dest.read_bytes(), dest.name)
     print(f"loader sees: key={song.key_root} bpm={song.bpm:.0f} bars={len(song.bars)} "

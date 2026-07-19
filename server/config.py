@@ -87,6 +87,13 @@ DEFAULT_SONG = os.environ.get("WM_DEFAULT_SONG", "zelda-fairy.mid")
 # commands (see server/discovery.py). WM_DISCOVERY_OFF=1 disables.
 DISCOVERY_PORT = int(os.environ.get("WM_DISCOVERY_PORT", "41234"))
 
+# --- Gemini (optional): musical cleanup for transcribed songs ---
+# The YouTube->MIDI path (basic-pitch) produces phantom-note soup; Gemini
+# rewrites it as clean parts in the phone grid format (melody identified,
+# bass/harmony separated, artifacts dropped). tools/gemini_clean.py.
+GEMINI_KEY = os.environ.get("WM_GEMINI_KEY", "")
+GEMINI_MODEL = os.environ.get("WM_GEMINI_MODEL", "gemini-2.5-flash")
+
 # --- Decision model (optional; unset = heuristic ranker only) ---
 # Any OpenAI-compatible serving base works, e.g. a Freesolo deploy:
 #   WM_MODEL_URL=https://<serving-host>/v1  WM_MODEL_NAME=<run-id>  WM_MODEL_KEY=<key>
