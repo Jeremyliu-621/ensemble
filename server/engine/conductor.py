@@ -221,33 +221,31 @@ class Conductor:
     def on_gesture(self, window: GestureWindow) -> None:
         self._gesture_in(extract_features(window), window.t_end_server_ms)
 
+    # Each committed stroke is a FIXED device — one movement, one meaning,
+    # every time. Live-meter vigor scaling was tried and cut: real-hardware
+    # meters read near zero at commit time (the 0.7s window has decayed), so
+    # vigor-scaled swipes landed too weak to engage anything. Deterministic
+    # bands are what a performer can actually rehearse:
+    #   sweep RIGHT = harmony blooms      sweep LEFT = passing runs
+    #   CIRCLE/SHAKE = arpeggio           point/RAISE up = swell arc
+    #   point/LOWER down = hush           STAB = accent only
+    _STROKE_MAP = {
+        "RIGHT_SWIPE": GestureFeatures(energy=0.85, size=0.75, duration=0.7),
+        "LEFT_SWIPE":  GestureFeatures(energy=0.72, size=0.70, duration=0.7),
+        "RAISE":       GestureFeatures(energy=0.55, size=0.50, vertical=0.9, duration=1.0),
+        "LOWER":       GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0),
+        "CIRCLE":      GestureFeatures(energy=0.40, size=0.40, rotation=0.9, duration=0.7),
+        "STAB":        GestureFeatures(energy=0.90, size=0.40, duration=0.25),
+        "SHAKE":       GestureFeatures(energy=1.00, size=0.90, duration=0.7),
+    }
+
     def on_stroke(self, label: str, meters: dict, server_ms: float) -> None:
         """A committed stroke from the CONTINUOUS hardware-wand stream (no grab
-        edges — StrokeTracker segments the motion; this maps its vocabulary
-        onto the same feature pipeline). Classic conducting semantics:
-        swipe = a push whose vigor picks the device, palms LOWER = hush,
-        RAISE = swell (arms the build arc), CIRCLE = arpeggio, STAB = the
-        accent, SHAKE = full vigor. Meters are the tracker's measured
-        {energy,size,lift,swirl}, so a gentle swipe and a violent one land
-        in different style bands like every other input path."""
-        e = float(meters.get("energy", 0.5))
-        s = float(meters.get("size", 0.5))
-        sw = float(meters.get("swirl", 0.0))
-        if label in ("LEFT_SWIPE", "RIGHT_SWIPE"):
-            f = GestureFeatures(energy=0.6 + 0.4 * e, size=0.55 + 0.45 * s, duration=0.7)
-        elif label == "RAISE":
-            f = GestureFeatures(energy=max(0.5, e), size=max(0.4, s), vertical=0.9,
-                                duration=1.0)          # sustained lift: arms the swell arc
-        elif label == "LOWER":
-            f = GestureFeatures(energy=0.05, size=0.05, vertical=-0.9, duration=1.0)
-        elif label == "CIRCLE":
-            f = GestureFeatures(energy=max(0.3, e), size=max(0.3, s),
-                                rotation=max(0.7, sw), duration=0.7)
-        elif label == "STAB":
-            f = GestureFeatures(energy=0.9, size=0.4, duration=0.25)
-        elif label == "SHAKE":
-            f = GestureFeatures(energy=1.0, size=0.9, duration=0.7)
-        else:                                          # STILL etc: the envelope relaxes on its own
+        edges — StrokeTracker segments the motion, including the tilt-hold
+        RAISE/LOWER poses). Maps the stroke onto the same feature pipeline as
+        every other input path via the fixed vocabulary above."""
+        f = self._STROKE_MAP.get(label)
+        if f is None:                                  # STILL etc: envelope relaxes on its own
             return
         log.info("stroke %s -> %s", label, {k: round(v, 2) for k, v in f.as_dict().items()})
         self._gesture_in(f, server_ms)

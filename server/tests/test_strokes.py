@@ -128,6 +128,21 @@ def test_shake():
     assert "SHAKE" in got, got
 
 
+def test_tilt_hold_commits_raise_lower():
+    """Pointing the wand clearly up/down and holding calmly = RAISE/LOWER —
+    a pure gravity read (the robust path for real hardware)."""
+    tr = StrokeTracker()
+    run(tr, frames(rest(0.4)))
+    up = lambda i, t: (0.0, G, 0.0, 0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
+    got, _ = run(tr, frames(up, t0=2000))
+    assert "RAISE" in got, got
+    tr2 = StrokeTracker()
+    run(tr2, frames(rest(0.4)))
+    down = lambda i, t: (0.0, -G, 0.0, 0.0, 0.0, 0.0) if i < 90 else None  # noqa: E731
+    got2, _ = run(tr2, frames(down, t0=2000))
+    assert "LOWER" in got2, got2
+
+
 def test_still_and_noise_never_commit():
     tr = StrokeTracker()
     _, last = run(tr, frames(rest(1.2)))
