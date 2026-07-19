@@ -67,29 +67,31 @@ def gyro_pulse(axis, dps, duration_s):
     return spec
 
 
-def test_right_swipe():
+def test_point_right_left_yaw_zones():
+    """Turn past ±35° of the calibrated forward and dwell -> POINT_RIGHT /
+    POINT_LEFT. recal() re-zeroes forward."""
     tr = StrokeTracker()
     run(tr, frames(rest(0.3)))
-    got, _ = run(tr, frames(gyro_pulse(6, 120.0, 0.45), t0=2000))
-    assert got == ["RIGHT_SWIPE"], got
+    turn = frames(gyro_pulse(6, 120.0, 0.5), t0=2000)     # +60 deg
+    dwell = frames(rest(1.0), t0=2600)
+    got, _ = run(tr, turn + dwell)
+    assert "POINT_RIGHT" in got, got
+    tr.recal()                                            # here = new forward
+    got2, _ = run(tr, frames(rest(1.6), t0=4000))
+    assert "POINT_RIGHT" not in got2, got2                 # recal cleared the zone
+    turn_l = frames(gyro_pulse(6, -120.0, 0.5), t0=6000)  # -60 deg from new zero
+    dwell_l = frames(rest(1.0), t0=6600)
+    got3, _ = run(tr, turn_l + dwell_l)
+    assert "POINT_LEFT" in got3, got3
 
 
-def test_left_swipe():
-    tr = StrokeTracker()
-    run(tr, frames(rest(0.3)))
-    got, _ = run(tr, frames(gyro_pulse(6, -120.0, 0.45), t0=2000))
-    assert got == ["LEFT_SWIPE"], got
-
-
-def test_raise_lower():
+def test_motion_pitch_pulses_commit_nothing():
+    """Motion detection is gone: a pitch-rate pulse with level gravity is not
+    a RAISE — only actually POINTING up (gravity) commits."""
     tr = StrokeTracker()
     run(tr, frames(rest(0.3)))
     got, _ = run(tr, frames(gyro_pulse(4, 100.0, 0.45), t0=2000))
-    assert got == ["RAISE"], got
-    tr2 = StrokeTracker()
-    run(tr2, frames(rest(0.3)))
-    got2, _ = run(tr2, frames(gyro_pulse(4, -100.0, 0.45), t0=2000))
-    assert got2 == ["LOWER"], got2
+    assert "RAISE" not in got and "LOWER" not in got, got
 
 
 def test_circle_motion_no_longer_commits():
@@ -111,8 +113,9 @@ def test_pose_zones():
     RAISE, wrist rolls = ROLL_RIGHT/ROLL_LEFT."""
     tilt45 = G * math.sin(math.radians(42.0))     # ~0.67g on the lift axis
     cases = [
-        ((0.0, tilt45, G * math.cos(math.radians(42.0))), "HALF_RAISE"),
+        ((0.0, tilt45, G * math.cos(math.radians(42.0))), "RAISE"),   # 42 deg counts as up
         ((0.0, G, 0.0), "RAISE"),
+        ((0.0, -G, 0.0), "LOWER"),
         ((G * 0.95, 0.0, G * 0.31), "ROLL_RIGHT"),    # rolled ~72 deg right
         ((-G * 0.95, 0.0, G * 0.31), "ROLL_LEFT"),
     ]
@@ -124,7 +127,9 @@ def test_pose_zones():
         assert want in got, f"{want}: {got}"
 
 
-def test_stab():
+def test_stab_no_longer_commits():
+    """STAB was cut with the rest of motion detection — an accel spike must
+    commit nothing (it constantly false-fired on pose transitions)."""
     tr = StrokeTracker()
     run(tr, frames(rest(0.4)))
 
@@ -134,7 +139,7 @@ def test_stab():
         spike = 14.0 if 5 <= i < 9 else 0.0    # short hard jab, no rotation
         return (spike, 0.0, G, 0.0, 0.0, 0.0)
     got, _ = run(tr, frames(spec, t0=2000))
-    assert got == ["STAB"], got
+    assert "STAB" not in got, got
 
 
 def test_shake():

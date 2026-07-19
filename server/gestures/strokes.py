@@ -38,13 +38,12 @@ RAISE_DEG = 30.0      # net pitch travel for raise/lower
 CIRCLE_ROT_DEG = 260.0  # cumulative rotation with little net travel -> circle
 STAB_ACC = 12.0       # linear-accel spike (m/s^2) — high: real swipes peak past 8
 STAB_TRAVEL = 20.0    # a stab goes nowhere: net yaw+pitch travel must stay tiny
-# ── pose zones (gravity-only: drift-free, no motion dynamics) ────────────────
-# Where the wand POINTS is the primary vocabulary; movement strokes are extras.
-TILT_HIGH = 0.80      # pointed ~90% up
-TILT_HALF = 0.50      # pointed halfway up
+# ── pose zones: the whole vocabulary ─────────────────────────────────────────
+TILT_UP = 0.55        # pointed up (gravity read, drift-free)
 TILT_DOWN = -0.50     # pointed down
 ROLL_DEG = 55.0       # wrist roll (about the wand's long axis) to count as rolled
 ROLL_SIGN = float(os.environ.get("WM_ROLL_SIGN", "1"))   # -1 if rolls read mirrored
+YAW_ZONE_DEG = 35.0   # pointed left/right of calibrated forward (integrated yaw)
 TILT_HOLD_MS = 600.0  # zone held that long (calmly) -> commits
 TILT_REFIRE_MS = 1400.0  # ...and re-commits while held, so a hush stays down
 TILT_CALM_RMS = 2.5   # poses read only while the wand is otherwise quiet
@@ -54,10 +53,15 @@ SHAKE_RMS = 3.0       # ...with at least this much vigor
 _GRAV_ALPHA = 0.08    # gravity EMA
 _NOISE_ACC = 1.5      # ignore reversals below this (m/s^2)
 
-# CIRCLE (gyro-loop detection) was cut: it false-fired on ordinary waving.
-# Arpeggio now comes from the ROLL poses (wrist-roll + hold) or SHAKE.
-STROKES = ("LEFT_SWIPE", "RIGHT_SWIPE", "RAISE", "HALF_RAISE", "LOWER",
-           "ROLL_LEFT", "ROLL_RIGHT", "STAB", "SHAKE", "STILL")
+# Motion detection (swipes/circle/stab/motion-raise) was cut wholesale: it
+# needed an unrealistically steady hand and false-fired constantly on real
+# hardware. The vocabulary is WHERE THE WAND POINTS, held ~0.6s:
+#   UP = swell · DOWN = hush · RIGHT = harmony · LEFT = runs · ROLL = arpeggio
+# SHAKE is the one motion survivor (rapid reversals — robust, and select-all
+# needs it). LEFT/RIGHT use the same integrated yaw as the aiming beam, so
+# the console's recalibrate button re-zeroes "forward" for both.
+STROKES = ("POINT_LEFT", "POINT_RIGHT", "RAISE", "LOWER",
+           "ROLL_LEFT", "ROLL_RIGHT", "SHAKE", "STILL")
 
 
 class StrokeTracker:
@@ -76,6 +80,12 @@ class StrokeTracker:
         self._pose_zone: str | None = None     # which pose zone the wand is held in
         self._tilt_since: float | None = None  # when the current pose-hold began
         self._tilt_fired = 0.0                 # last pose commit (for re-fire)
+        self._yaw = 0.0                        # integrated yaw for LEFT/RIGHT zones
+
+    def recal(self) -> None:
+        """Wherever the wand points now is 'forward' (the console's 🎯 button
+        calls this alongside the aimer's recal — one zero for beam and zones)."""
+        self._yaw = 0.0
 
     def push(self, frames: list[list[float]]) -> tuple[str | None, dict, bool]:
         """Feed one batch. Returns (stroke, meters, committed_new).
@@ -116,25 +126,27 @@ class StrokeTracker:
         if la_mag > 1.0 or gyro_mag > 40.0:
             self._last_active = tw
 
-        # Pose zones: WHERE the wand points (and how it's rolled), held calmly,
-        # is the primary vocabulary — pure gravity reads, drift-free, no
-        # motion-dynamics thresholds. A zone held TILT_HOLD_MS commits and
-        # RE-commits while held, so "pointed at the floor" keeps the room
-        # hushed. Switching zones restarts the hold clock.
+        # Pose zones ARE the vocabulary: where the wand points (tilt from
+        # gravity, left/right from integrated yaw, roll about its long axis),
+        # held calmly ~0.6s. A held zone RE-commits, so "pointed at the floor"
+        # keeps the room hushed. Switching zones restarts the hold clock.
+        self._yaw += yaw_rate * dt
         tilt = self._g[1] / 9.8
         roll = math.degrees(math.atan2(self._g[0], self._g[2])) * ROLL_SIGN
         zone: str | None = None
         if la_mag < TILT_CALM_RMS:
-            if tilt > TILT_HIGH:
-                zone = "RAISE"                  # ~90% up: the swell
-            elif tilt > TILT_HALF:
-                zone = "HALF_RAISE"             # halfway up: harmony
+            if tilt > TILT_UP:
+                zone = "RAISE"                  # up: the swell
             elif tilt < TILT_DOWN:
                 zone = "LOWER"                  # down: hush
-            elif abs(tilt) < 0.45 and roll > ROLL_DEG:
-                zone = "ROLL_RIGHT"             # wrist rolled right: arpeggio
-            elif abs(tilt) < 0.45 and roll < -ROLL_DEG:
-                zone = "ROLL_LEFT"              # wrist rolled left: passing
+            elif roll > ROLL_DEG:
+                zone = "ROLL_RIGHT"             # wrist rolled: arpeggio
+            elif roll < -ROLL_DEG:
+                zone = "ROLL_LEFT"
+            elif self._yaw > YAW_ZONE_DEG:
+                zone = "POINT_RIGHT"            # right of forward: harmony
+            elif self._yaw < -YAW_ZONE_DEG:
+                zone = "POINT_LEFT"             # left of forward: runs
         if zone != self._pose_zone:
             self._pose_zone = zone
             self._tilt_since = tw if zone else None
@@ -200,22 +212,12 @@ class StrokeTracker:
         if len(self._win) < 5:
             return False
         ft = self._features()
+        # SHAKE is the only surviving MOTION stroke (rapid reversals — robust
+        # without a steady hand, and select-all needs it). Everything else is
+        # pose zones, handled in _ingest.
         cand: str | None = None
-        # straight strokes must be DOMINANTLY one axis AND straight (a swipe's
-        # gyro direction is constant; a circle's rotates) — otherwise a
-        # circle's quarters read as swipes before the loop closes
-        straight = abs(ft["dir_rot"]) < math.radians(60.0)
-        yaw_dom = abs(ft["dyaw"]) > 0.65 * ft["rot"] and straight
-        pitch_dom = abs(ft["dpitch"]) > 0.65 * ft["rot"] and straight
         if ft["reversals"] >= SHAKE_REVERSALS and ft["la_rms"] > SHAKE_RMS:
             cand = "SHAKE"
-        elif (ft["peak"] > STAB_ACC and ft["rot"] < 60.0
-              and abs(ft["dyaw"]) < STAB_TRAVEL and abs(ft["dpitch"]) < STAB_TRAVEL):
-            cand = "STAB"           # a spike that TRAVELS is a swipe, not a stab
-        elif abs(ft["dyaw"]) > SWIPE_DEG and yaw_dom:
-            cand = "RIGHT_SWIPE" if ft["dyaw"] > 0 else "LEFT_SWIPE"
-        elif abs(ft["dpitch"]) > RAISE_DEG and pitch_dom:
-            cand = "RAISE" if ft["dpitch"] > 0 else "LOWER"
         if cand is None:
             return False
         if cand == self._latched and tw < self._latch_until:

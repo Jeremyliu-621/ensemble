@@ -568,6 +568,7 @@ class App:
             return
         if t == P.WAND_RECAL:
             self.aimer.recal()
+            self.strokes.recal()                # beam and pose zones share one "forward"
             return
         if t == P.STAGE_ASSIGN:
             await self._assign_instrument(msg.get("section_id"), msg.get("instrument"))

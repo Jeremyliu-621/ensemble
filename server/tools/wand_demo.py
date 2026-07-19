@@ -98,23 +98,22 @@ async def strokes_mode(loops: int) -> None:
         """A held orientation: gravity sits on the given axes, no motion."""
         return (name, lambda t: (ax, ay, az, 0.0, 0.0, 0.0), dur)
 
-    def stab(t):
-        return (14.0 if 0.10 <= t < 0.18 else 0.0, 0.0, 9.81, 0.0, 0.0, 0.0)
+    def turn_hold(name, gz, dur=1.8):
+        """Yaw-turn for 0.5s, then hold still: enters a POINT_LEFT/RIGHT zone.
+        Yaw INTEGRATES across segments, so the script must return to zero."""
+        return (name, lambda t: (0.0, 0.0, 9.81, 0.0, 0.0, gz if t < 0.5 else 0.0), dur)
 
     def shake(t):
         return (9.0 * _m.sin(2 * _m.pi * 7 * t), 0.0, 9.81, 0.0, 0.0, 0.0)
 
     SCRIPT = [
-        gyro("RIGHT_SWIPE", gz=120.0),
-        gyro("LEFT_SWIPE", gz=-120.0),
-        gyro("RAISE", gx=100.0),
-        gyro("LOWER", gx=-100.0),
-        pose("HALF_RAISE (pose)", ay=6.6, az=7.2),
+        turn_hold("POINT_RIGHT (pose)", 120.0),    # yaw 0 -> +60
+        turn_hold("POINT_LEFT (pose)", -240.0),    # +60 -> -60
+        turn_hold("recenter", 120.0),              # -60 -> 0 (dwell commits nothing)
         pose("RAISE (pose)", ay=9.81, az=0.0),
         pose("LOWER (pose)", ay=-9.81, az=0.0),
         pose("ROLL_RIGHT (pose)", ax=9.3, az=3.0),
         pose("ROLL_LEFT (pose)", ax=-9.3, az=3.0),
-        ("STAB", stab, 0.4),
         ("SHAKE", shake, 0.7),
     ]
 
